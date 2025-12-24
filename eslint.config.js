@@ -1,8 +1,8 @@
-import pluginJs from '@eslint/js'
-import tseslint from 'typescript-eslint'
-import pluginReact from 'eslint-plugin-react'
-import eslintConfigPrettier from 'eslint-config-prettier'
-import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended'
+import pluginJs from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import pluginReact from 'eslint-plugin-react';
+import eslintConfigPrettier from 'eslint-config-prettier';
+import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 
 export default [
   {
@@ -26,4 +26,4 @@ export default [
       'react/react-in-jsx-scope': 'off'
     }
   }
-]
+];

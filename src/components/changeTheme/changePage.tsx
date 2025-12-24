@@ -4,19 +4,20 @@ import {
   ModalRoot,
   PanelSection,
   PanelSectionRow,
+  showModal,
   SteamSpinner,
   TextField,
-  showModal,
   useParams
-} from '@decky/ui'
-import { useEffect, useState } from 'react'
-import { useSettings } from '../../hooks/useSettings'
-import AudioPlayer from './audioPlayer'
-import { getCache, updateCache } from '../../cache/musicCache'
-import useTranslations from '../../hooks/useTranslations'
-import { YouTubeVideoPreview } from '../../../types/YouTube'
-import NoMusic from './noMusic'
-import { getResolver } from '../../actions/audio'
+} from '@decky/ui';
+import { useEffect, useState } from 'react';
+import { useSettings } from '../../hooks/useSettings';
+import AudioPlayer from './audioPlayer';
+import { getCache, updateCache } from '../../cache/musicCache';
+import useTranslations from '../../hooks/useTranslations';
+import { YouTubeVideoPreview } from '../../../types/YouTube';
+import NoMusic from './noMusic';
+import { getResolver } from '../../actions/audio';
+import LocalMusicImport from './localMusicImport';
 
 export default function ChangePage({
   customSearch,
@@ -26,55 +27,65 @@ export default function ChangePage({
   loading,
   videos
 }: {
-  videos: (YouTubeVideoPreview & { isPlaying: boolean })[]
-  loading: boolean
-  handlePlay: (idx: number, startPlaying: boolean) => void
-  customSearch: (term: string) => void
-  setInitialSearch: () => string
-  currentSearch: string
+  videos: (YouTubeVideoPreview & { isPlaying: boolean })[];
+  loading: boolean;
+  handlePlay: (idx: number, startPlaying: boolean) => void;
+  customSearch: (term: string) => void;
+  setInitialSearch: () => string;
+  currentSearch: string;
 }) {
-  const t = useTranslations()
-  const { settings } = useSettings()
-  const { appid } = useParams<{ appid: string }>()
-  const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid))
-  const appName = appDetails?.display_name?.replace(/(™|®|©)/g, '')
-  const [selected, setSelected] = useState<string | undefined>()
-  const [searchTerm, setSearchTerm] = useState(currentSearch)
+  const t = useTranslations();
+  const { settings } = useSettings();
+  const { appid } = useParams<{ appid: string }>();
+  const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid));
+  const appName = appDetails?.display_name?.replace(/([™®©])/g, '');
+  const [selected, setSelected] = useState<string | undefined>();
+  const [searchTerm, setSearchTerm] = useState(currentSearch);
 
   useEffect(() => {
     async function getData() {
-      const cache = await getCache(parseInt(appid))
-      setSelected(cache?.videoId)
+      const cache = await getCache(parseInt(appid));
+      setSelected(cache?.videoId);
     }
-    getData()
-  }, [appid])
+    getData().then(() => {
+      return;
+    });
+  }, [appid]);
 
   async function selectNewAudio(audio: {
-    title: string
-    videoId: string
-    audioUrl: string
+    title: string;
+    videoId: string;
+    audioUrl: string;
   }) {
-    if (settings.downloadAudio) {
-      const success = await getResolver(settings.useYtDlp).downloadAudio({
+    let provider: 'ytdlp' | 'itunes' | 'local' = 'ytdlp';
+    if (audio.videoId.startsWith('itunes_')) {
+      provider = 'itunes';
+    } else if (audio.videoId.startsWith('local_')) {
+      provider = 'local';
+    }
+
+    if (provider !== 'local') {
+      const success = await getResolver(provider).downloadAudio({
         id: audio.videoId,
         url: audio.audioUrl
-      })
+      });
       if (!success) {
         showModal(
           <ModalRoot>{t('downloadFailedDetail')}</ModalRoot>,
           undefined,
           { strTitle: t('downloadFailed') }
-        )
-        return
+        );
+        return;
       }
     }
-    setSelected(audio.videoId)
-    updateCache(parseInt(appid), { videoId: audio.videoId })
+    setSelected(audio.videoId);
+    await updateCache(parseInt(appid), { videoId: audio.videoId });
   }
 
   return (
     <div>
       <h2 style={{ margin: '20px 0' }}>{appName}</h2>
+      <LocalMusicImport selectNewAudio={selectNewAudio} />
       <PanelSection>
         <PanelSectionRow>
           <Focusable
@@ -90,8 +101,8 @@ export default function ChangePage({
           >
             <form
               onSubmit={(e) => {
-                e.preventDefault()
-                customSearch(searchTerm)
+                e.preventDefault();
+                customSearch(searchTerm);
               }}
             >
               <TextField
@@ -110,7 +121,7 @@ export default function ChangePage({
               disabled={!searchTerm?.length}
               focusable={!loading && Boolean(searchTerm?.length)}
               onClick={() => {
-                setSearchTerm(setInitialSearch())
+                setSearchTerm(setInitialSearch());
               }}
             >
               {t('reset')}
@@ -141,7 +152,7 @@ export default function ChangePage({
                 video={video}
                 volume={settings.volume}
                 handlePlay={(status) => {
-                  handlePlay(index, status)
+                  handlePlay(index, status);
                 }}
                 selected={selected === video.id}
                 selectNewAudio={selectNewAudio}
@@ -152,5 +163,5 @@ export default function ChangePage({
         </>
       )}
     </div>
-  )
+  );
 }

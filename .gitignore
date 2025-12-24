@@ -47,3 +47,4 @@ backend/out
 .pnpm-store/
 cli/
 out/
+/.vscode/
