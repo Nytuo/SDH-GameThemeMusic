@@ -703,3 +703,25 @@ class Plugin:
                     logger.error(f"Error deleting cache file {file}: {e}")
         logger.info(f"Cleared {count} cache backup files from {cache_path}")
         return count
+
+    async def import_local_music(self, source_path: str, dest_name: str) -> bool:
+        """
+        Import a local music file into the plugin's music directory.
+        :param source_path: str Path to the source file
+        :param dest_name: str Desired name (without extension)
+        :return: bool Success status
+        """
+        import shutil
+        try:
+            src = Path(source_path)
+            if not src.is_file():
+                logger.error(f"Source file does not exist: {source_path}")
+                return False
+            ext = src.suffix
+            dest = Path(self.music_path) / f"{dest_name}{ext}"
+            shutil.copy2(src, dest)
+            logger.info(f"Imported local music file: {src} -> {dest}")
+            return True
+        except Exception as e:
+            logger.error(f"Error importing local music file: {e}")
+            return False

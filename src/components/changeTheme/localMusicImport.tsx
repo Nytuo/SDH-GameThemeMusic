@@ -1,26 +1,34 @@
 import { call } from '@decky/api';
 import {
+  DialogButton,
+  Focusable,
   ModalRoot,
   PanelSection,
   PanelSectionRow,
-  TextField,
   showModal,
-  Focusable,
-  DialogButton
+  TextField
 } from '@decky/ui';
 import { useState } from 'react';
 import FileBrowser from './fileBrowser';
 
+const SuccessModalContent = ({
+  message,
+  closeModal
+}: {
+  message: string;
+  closeModal?: () => void;
+}) => (
+  <ModalRoot>
+    <div style={{ padding: 24, textAlign: 'center' }}>
+      <h3>Success</h3>
+      <div style={{ margin: '16px 0' }}>{message}</div>
+      <DialogButton onClick={closeModal}>Close</DialogButton>
+    </div>
+  </ModalRoot>
+);
+
 function showSuccessModal(message: string) {
-  showModal(
-    <ModalRoot>
-      <div style={{ padding: 24, textAlign: 'center' }}>
-        <h3>Success</h3>
-        <div style={{ margin: '16px 0' }}>{message}</div>
-        <DialogButton onClick={() => showModal(null)}>Close</DialogButton>
-      </div>
-    </ModalRoot>
-  );
+  showModal(<SuccessModalContent message={message} />);
 }
 
 export default function LocalMusicImport({
@@ -35,10 +43,19 @@ export default function LocalMusicImport({
   const [customName, setCustomName] = useState('');
   const [selectedFile, setSelectedFile] = useState('');
 
-  async function handleFileSelect(_: string, fileName: string) {
+  async function handleFileSelect(filePath: string, fileName: string) {
     setSelectedFile(fileName);
+    const id = `local_${fileName.replace(/\.[^/.]+$/, '')}`;
+    const importResult = await call<[string, string], boolean>(
+      'import_local_music',
+      filePath,
+      fileName.replace(/\.[^/.]+$/, '')
+    );
+    if (!importResult) {
+      showSuccessModal('Failed to import music file.');
+      return;
+    }
     if (selectNewAudio) {
-      const id = `local_${fileName.replace(/\.[^/.]+$/, '')}`;
       const res = await call<[string], string | null>(
         'get_local_music_url',
         id
