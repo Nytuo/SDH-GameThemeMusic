@@ -82,6 +82,7 @@ Since this plugin is not available in the Decky Loader plugin store, you will ne
 4. Copy the extracted folder to your Decky Loader plugins directory:
    - On SteamOS (including Steam Deck): `~/.homebrew/plugins/`
    - On Windows: `%USER%\homebrew\plugins\`
+5. Add `yt-dlp` binary under the bin folder in the plugin folder for proper YouTube support. (windows or linux version depending on your OS)
 5. Restart Decky Loader or Steam Deck to load the new plugin.
 6. Enjoy your game theme music!
 
