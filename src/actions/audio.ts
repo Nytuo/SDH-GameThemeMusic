@@ -1,265 +1,208 @@
-import { call } from '@decky/api'
-import {
-  YouTubeVideo,
-  YouTubeInitialData,
-  Audio,
-  YouTubeVideoPreview
-} from '../../types/YouTube'
-import { Settings, defaultSettings } from '../hooks/useSettings'
+import { call } from '@decky/api';
+import { YouTubeVideo, YouTubeVideoPreview } from '../../types/YouTube';
 
 abstract class AudioResolver {
-  abstract getYouTubeSearchResults(
+  abstract getSearchResults(
     searchTerm: string
-  ): AsyncIterable<YouTubeVideoPreview>
+  ): AsyncIterable<YouTubeVideoPreview>;
   abstract getAudioUrlFromVideo(
     video: YouTubeVideo
-  ): Promise<string | undefined>
-  abstract downloadAudio(video: YouTubeVideo): Promise<boolean>
+  ): Promise<string | undefined>;
+  abstract downloadAudio(video: YouTubeVideo): Promise<boolean>;
 
   async getAudio(
     appName: string
   ): Promise<{ videoId: string; audioUrl: string } | undefined> {
-    const videos = this.getYouTubeSearchResults(appName + ' Theme Music')
+    const videos = this.getSearchResults(appName + ' Theme Music');
     for await (const video of videos) {
-      const audioUrl = await this.getAudioUrlFromVideo(video)
+      const audioUrl = await this.getAudioUrlFromVideo(video);
       if (audioUrl?.length) {
-        return { audioUrl, videoId: video.id }
-      }
-    }
-    return undefined
-  }
-}
-
-class InvidiousAudioResolver extends AudioResolver {
-  async getEndpoint() {
-    const savedSettings = await call<[string, Settings], Settings>(
-      'get_setting',
-      'settings',
-      defaultSettings
-    )
-    return savedSettings.invidiousInstance
-  }
-
-  async *getYouTubeSearchResults(
-    searchTerm: string
-  ): AsyncIterable<YouTubeVideoPreview> {
-    try {
-      const encodedSearchTerm = `${encodeURIComponent(searchTerm)}`
-      const endpoint = await this.getEndpoint()
-      const res = await fetch(
-        `${endpoint}/api/v1/search?type=video&page=1&q=${encodedSearchTerm}`
-      )
-      if (res.status === 200) {
-        const results: YouTubeInitialData = await res.json()
-        if (results.length) {
-          yield* results
-            .map((res) => ({
-              title: res.title,
-              id: res.videoId,
-              thumbnail:
-                res.videoThumbnails?.[0].url || 'https://i.ytimg.com/vi/0.jpg'
-            }))
-            .filter((res) => res.id.length)
+        if (!video.id.startsWith('local_')) {
+          await this.downloadAudio(video);
         }
-      }
-    } catch (err) {
-      console.debug(err)
-    }
-    return
-  }
-
-  async getAudioUrlFromVideo(video: YouTubeVideo): Promise<string | undefined> {
-    try {
-      const endpoint = await this.getEndpoint()
-      const res = await fetch(
-        `${endpoint}/api/v1/videos/${encodeURIComponent(video.id)}?fields=adaptiveFormats`
-      )
-      if (res.status === 200) {
-        const result = await res.json()
-        const audioFormats: { adaptiveFormats: Audio[] } = result
-
-        const audios = audioFormats.adaptiveFormats.filter((aud) =>
-          aud.type?.includes('audio/webm')
-        )
-        const audio = audios.reduce((prev, current) => {
-          return prev.audioSampleRate > current.audioSampleRate ? prev : current
-        }, audios[0])
-
-        return audio?.url
-      }
-    } catch (err) {
-      console.log(err)
-    }
-    return undefined
-  }
-
-  async downloadAudio(video: YouTubeVideo): Promise<boolean> {
-    if (!video.url) {
-      video.url = await this.getAudioUrlFromVideo(video)
-      if (!video.url) {
-        return false
+        return { audioUrl, videoId: video.id };
       }
     }
-    try {
-      await call<[string, string]>('download_url', video.url, video.id)
-      return true
-    } catch (e) {
-      console.error(e)
-      return false
-    }
+    return undefined;
   }
 }
 
 class YtDlpAudioResolver extends AudioResolver {
-  async *getYouTubeSearchResults(
+  async *getSearchResults(
     searchTerm: string
   ): AsyncIterable<YouTubeVideoPreview> {
     try {
-      await call<[string]>('search_yt', searchTerm)
-      let result = await call<[], YouTubeVideoPreview | null>('next_yt_result')
+      await call<[string]>('search_yt', searchTerm);
+      let result = await call<[], YouTubeVideoPreview | null>('next_yt_result');
       while (result) {
-        yield result
-        result = await call<[], YouTubeVideoPreview | null>('next_yt_result')
+        yield result;
+        result = await call<[], YouTubeVideoPreview | null>('next_yt_result');
       }
-      return
+      return;
     } catch (err) {
-      console.error(err)
+      console.error('YtDlp search error:', err);
     }
-    return
+    return;
   }
 
   async getAudioUrlFromVideo(video: YouTubeVideo): Promise<string | undefined> {
     if (video.url) {
-      return video.url
+      return video.url;
     } else {
-      // We need to retrieve the audio URL first.
-      // This may return a local filesystem URL if the file has been downloaded before.
       const result = await call<[string], string | null>(
         'single_yt_url',
         video.id
-      )
-      return result || undefined
+      );
+      return result || undefined;
     }
   }
 
   async downloadAudio(video: YouTubeVideo): Promise<boolean> {
     try {
-      await call<[string]>('download_yt_audio', video.id)
-      return true
+      await call<[string]>('download_yt_audio', video.id);
+      return true;
     } catch (e) {
-      console.error(e)
-      return false
+      console.error('YtDlp download error:', e);
+      return false;
     }
   }
 }
 
-export function getResolver(useYtDlp: boolean): AudioResolver {
-  if (useYtDlp) {
-    return new YtDlpAudioResolver()
-  } else {
-    return new InvidiousAudioResolver()
-  }
+interface ITunesResult {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail: string;
+  artist: string;
+  album: string;
+  duration: number;
 }
 
-type InvidiousInstance = {
-  flag: string
-  region: string
-  stats: {
-    version: string
-    software: {
-      name: string
-      version: string
-      branch: string
-    }
-    openRegistrations: boolean
-    usage: {
-      users: {
-        total: number
-        activeHalfyear: number
-        activeMonth: number
+class ITunesAudioResolver extends AudioResolver {
+  async *getSearchResults(
+    searchTerm: string
+  ): AsyncIterable<YouTubeVideoPreview> {
+    try {
+      const results = await call<[string, number], ITunesResult[]>(
+        'search_itunes',
+        searchTerm,
+        10
+      );
+
+      if (results && results.length > 0) {
+        for (const result of results) {
+          yield {
+            id: result.id,
+            title: result.title,
+            thumbnail: result.thumbnail,
+            url: result.url
+          };
+        }
       }
+    } catch (err) {
+      console.error('iTunes search error:', err);
     }
-    metadata: {
-      updatedAt: number
-      lastChannelRefreshedAt: number
+    return;
+  }
+
+  async getAudioUrlFromVideo(video: YouTubeVideo): Promise<string | undefined> {
+    if (video.url && video.url.startsWith('http')) {
+      return video.url;
     }
-    playback?: {
-      totalRequests?: number
-      successfulRequests?: number
-      ratio?: number
+    try {
+      const url = await call<[string], string | null>(
+        'get_local_music_url',
+        video.id
+      );
+      return url || undefined;
+    } catch (e) {
+      console.error('iTunes local music URL error:', e);
+      return undefined;
     }
-  } | null
-  cors: boolean | null
-  api: boolean | null
-  type: string
-  uri: string
-  monitor: {
-    token: string
-    url: string
-    alias: string
-    last_status: number
-    uptime: number
-    down: boolean
-    down_since: string | null
-    up_since: string | null
-    error: string | null
-    period: number
-    apdex_t: number
-    string_match: string
-    enabled: boolean
-    published: boolean
-    disabled_locations: string[]
-    recipients: string[]
-    last_check_at: string
-    next_check_at: string
-    created_at: string
-    mute_until: string | null
-    favicon_url: string
-    custom_headers: Record<string, string>
-    http_verb: string
-    http_body: string
-    ssl: {
-      tested_at: string
-      expires_at: string
-      valid: boolean
-      error: string | null
+  }
+
+  async downloadAudio(video: YouTubeVideo): Promise<boolean> {
+    if (!video.url) {
+      console.error('No URL provided for iTunes audio download');
+      return false;
+    }
+    try {
+      await call<[string, string]>('download_url', video.url, video.id);
+      return true;
+    } catch (e) {
+      console.error('iTunes download error:', e);
+      return false;
     }
   }
 }
 
-type InvidiousInstances = InvidiousInstance[]
+class LocalMusicAudioResolver extends AudioResolver {
+  async *getSearchResults(
+    searchTerm: string
+  ): AsyncIterable<YouTubeVideoPreview> {
+    try {
+      const results = await call<[string, number], any[]>(
+        'search_local_music',
+        searchTerm,
+        100
+      );
 
-export async function getInvidiousInstances(): Promise<
-  { name: string; url: string }[]
-> {
-  try {
-    const res = await fetch(
-      'https://api.invidious.io/instances.json?&sort_by=users,health'
-    )
-    if (res.status === 200) {
-      const instances: InvidiousInstances = (await res.json()).map(
-        ([, instance]: [string, InvidiousInstance]) => instance
-      )
-      if (instances?.length) {
-        return instances
-          .filter((ins) => ins.type === 'https')
-          .map((ins) => ({
-            name: `${ins.flag} ${ins.monitor?.alias ?? ins.uri} | ${ins.stats?.usage.users.total} Users${
-              ins.monitor?.uptime
-                ? ` | Uptime: ${(ins.monitor.uptime / 100).toLocaleString(
-                    'en',
-                    {
-                      style: 'percent'
-                    }
-                  )}`
-                : ''
-            }`,
-            url: ins.uri
-          }))
+      if (results && results.length > 0) {
+        for (const result of results) {
+          yield {
+            id: result.id,
+            title: result.title,
+            thumbnail: result.thumbnail || '',
+            url: result.url || ''
+          };
+        }
       }
+    } catch (err) {
+      console.error('Local music search error:', err);
     }
-  } catch (err) {
-    console.debug(err)
+    return;
   }
-  return []
+
+  async getAudioUrlFromVideo(video: YouTubeVideo): Promise<string | undefined> {
+    try {
+      const url = await call<[string], string | null>(
+        'get_local_music_url',
+        video.id
+      );
+      return url || undefined;
+    } catch (e) {
+      console.error('Local music URL error:', e);
+      return undefined;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async downloadAudio(_video: YouTubeVideo): Promise<boolean> {
+    return true;
+  }
+}
+
+export type AudioProvider = 'ytdlp' | 'itunes' | 'local';
+
+export function getProviderFromId(videoId: string): AudioProvider {
+  if (videoId.startsWith('itunes_')) return 'itunes';
+  if (videoId.startsWith('local_')) return 'local';
+  return 'ytdlp';
+}
+
+export function getResolver(provider: AudioProvider): AudioResolver {
+  switch (provider) {
+    case 'ytdlp':
+      return new YtDlpAudioResolver();
+    case 'itunes':
+      return new ITunesAudioResolver();
+    case 'local':
+      return new LocalMusicAudioResolver();
+    default:
+      return new YtDlpAudioResolver();
+  }
+}
+
+export function getResolverForVideoId(videoId: string): AudioResolver {
+  return getResolver(getProviderFromId(videoId));
 }

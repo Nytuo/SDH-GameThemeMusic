@@ -1,58 +1,61 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
 
-import { getResolver } from '../actions/audio'
+import { getResolverForVideoId } from '../actions/audio';
 
-import { getCache, updateCache } from '../cache/musicCache'
-import { useSettings } from '../hooks/useSettings'
+import { getCache, updateCache } from '../cache/musicCache';
+import { useSettings } from './useSettings';
 
 const useThemeMusic = (appId: number) => {
-  const { settings, isLoading: settingsLoading } = useSettings()
+  const { settings, isLoading: settingsLoading } = useSettings();
   const [audio, setAudio] = useState<{ videoId: string; audioUrl: string }>({
     videoId: '',
     audioUrl: ''
-  })
-  const appDetails = appStore.GetAppOverviewByGameID(appId)
-  const appName = appDetails?.display_name?.replace(/(™|®|©)/g, '')
+  });
+  const appDetails = appStore.GetAppOverviewByGameID(appId);
+  const appName = appDetails?.display_name?.replace(/([™®©])/g, '');
 
   useEffect(() => {
-    let ignore = false
+    let ignore = false;
     async function getData() {
-      const resolver = getResolver(settings.useYtDlp)
-      const cache = await getCache(appId)
+      const cache = await getCache(appId);
       if (cache?.videoId?.length == 0) {
-        return setAudio({ videoId: '', audioUrl: '' })
+        return setAudio({ videoId: '', audioUrl: '' });
       } else if (cache?.videoId?.length) {
+        const resolver = getResolverForVideoId(cache.videoId);
         const newAudio = await resolver.getAudioUrlFromVideo({
           id: cache.videoId
-        })
+        });
         if (newAudio?.length) {
-          return setAudio({ videoId: cache.videoId, audioUrl: newAudio })
+          return setAudio({ videoId: cache.videoId, audioUrl: newAudio });
         }
       } else if (settings.defaultMuted) {
-        return setAudio({ videoId: '', audioUrl: '' })
+        return setAudio({ videoId: '', audioUrl: '' });
       } else {
-        const newAudio = await resolver.getAudio(appName as string)
+        const resolver = getResolverForVideoId('');
+        const newAudio = await resolver.getAudio(appName as string);
         if (ignore) {
-          return
+          return;
         }
         if (!newAudio?.audioUrl?.length) {
-          return setAudio({ videoId: '', audioUrl: '' })
+          return setAudio({ videoId: '', audioUrl: '' });
         }
-        await updateCache(appId, newAudio)
-        return setAudio(newAudio)
+        await updateCache(appId, newAudio);
+        return setAudio(newAudio);
       }
     }
     if (appName?.length && !settingsLoading) {
-      getData()
+      getData().then(() => {
+        return;
+      });
     }
     return () => {
-      ignore = true
-    }
-  }, [appName, settingsLoading])
+      ignore = true;
+    };
+  }, [appName, settingsLoading]);
 
   return {
     audio
-  }
-}
+  };
+};
 
-export default useThemeMusic
+export default useThemeMusic;

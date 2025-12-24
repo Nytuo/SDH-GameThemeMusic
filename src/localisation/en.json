@@ -57,6 +57,8 @@
     "stop": "Stop",
     "supportDescription": "Visit the Steam Deck Homebrew Discord deckbrew.xyz/discord",
     "supportLabel": "Support",
+    "audioProvider": "Music Provider",
+    "audioProviderDescription": "Choose which service to use for searching music",
     "useYtDlp": "Use yt-dlp",
     "useYtDlpDescription": "Access YouTube directly without Invidious",
     "volume": "Music Volume",

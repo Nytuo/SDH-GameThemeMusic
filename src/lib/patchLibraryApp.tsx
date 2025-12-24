@@ -3,18 +3,18 @@ import {
   findInReactTree,
   appDetailsClasses,
   createReactTreePatcher
-} from '@decky/ui'
-import { routerHook } from '@decky/api'
-import { ReactElement } from 'react'
-import ThemePlayer from '../components/themePlayer'
+} from '@decky/ui';
+import { routerHook } from '@decky/api';
+import { ReactElement } from 'react';
+import ThemePlayer from '../components/themePlayer';
 import {
   AudioLoaderCompatState,
   AudioLoaderCompatStateContextProvider
-} from '../state/AudioLoaderCompatState'
+} from '../state/AudioLoaderCompatState';
 
 function patchLibraryApp(AudioLoaderCompatState: AudioLoaderCompatState) {
   return routerHook.addPatch('/library/app/:appid', (tree) => {
-    const routeProps = findInReactTree(tree, (x) => x?.renderFunc)
+    const routeProps = findInReactTree(tree, (x) => x?.renderFunc);
     if (routeProps) {
       const patchHandler = createReactTreePatcher(
         [
@@ -31,9 +31,9 @@ function patchLibraryApp(AudioLoaderCompatState: AudioLoaderCompatState) {
             (x: ReactElement) =>
               Array.isArray(x?.props?.children) &&
               x?.props?.className?.includes(appDetailsClasses.InnerContainer)
-          )
+          );
           if (typeof container !== 'object') {
-            return ret
+            return ret;
           }
 
           container.props.children.push(
@@ -42,17 +42,17 @@ function patchLibraryApp(AudioLoaderCompatState: AudioLoaderCompatState) {
             >
               <ThemePlayer />
             </AudioLoaderCompatStateContextProvider>
-          )
+          );
 
-          return ret
+          return ret;
         }
-      )
+      );
 
-      afterPatch(routeProps, 'renderFunc', patchHandler)
+      afterPatch(routeProps, 'renderFunc', patchHandler);
     }
 
-    return tree
-  })
+    return tree;
+  });
 }
 
-export default patchLibraryApp
+export default patchLibraryApp;

@@ -1,11 +1,11 @@
 {
   "name": "Game Theme Music",
-  "author": "OMGDuke, MegalonVII",
+  "author": "OMGDuke, MegalonVII, Nytuo",
   "flags": [],
   "api_version": 1,
   "publish": {
     "tags": ["audio"],
     "description": "Play theme songs on your game pages",
-    "image": "https://raw.githubusercontent.com/MegalonVII/SDH-GameThemeMusic/main/assets/publish_image.png"
+    "image": "https://raw.githubusercontent.com/Nytuo/SDH-GameThemeMusic/main/assets/publish_image.png"
   }
 }

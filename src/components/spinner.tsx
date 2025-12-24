@@ -1,4 +1,4 @@
-import { ImSpinner2 } from 'react-icons/im'
+import { ImSpinner2 } from 'react-icons/im';
 
 export default function Spinner() {
   return (
@@ -36,5 +36,5 @@ export default function Spinner() {
       </style>
       <ImSpinner2 className="icon-spin" />
     </div>
-  )
+  );
 }

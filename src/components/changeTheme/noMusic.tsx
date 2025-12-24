@@ -1,20 +1,20 @@
-import { DialogButton, Focusable } from '@decky/ui'
-import useTranslations from '../../hooks/useTranslations'
+import { DialogButton, Focusable } from '@decky/ui';
+import useTranslations from '../../hooks/useTranslations';
 
-import { FaCheck, FaVolumeMute } from 'react-icons/fa'
+import { FaCheck, FaVolumeMute } from 'react-icons/fa';
 
 export default function NoMusic({
   selected,
   selectNewAudio
 }: {
-  selected: boolean
+  selected: boolean;
   selectNewAudio: (audio: {
-    title: string
-    videoId: string
-    audioUrl: string
-  }) => void
+    title: string;
+    videoId: string;
+    audioUrl: string;
+  }) => void;
 }) {
-  const t = useTranslations()
+  const t = useTranslations();
   return (
     <div>
       <Focusable
@@ -103,5 +103,5 @@ export default function NoMusic({
         </div>
       </Focusable>
     </div>
-  )
+  );
 }

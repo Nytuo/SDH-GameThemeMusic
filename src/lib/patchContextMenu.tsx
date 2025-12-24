@@ -8,87 +8,85 @@ import {
   MenuItem,
   Navigation,
   Patch
-} from '@decky/ui'
-import useTranslations from '../hooks/useTranslations'
+} from '@decky/ui';
+import useTranslations from '../hooks/useTranslations';
 
 function ChangeMusicButton({ appId }: { appId: number }) {
-  const t = useTranslations()
+  const t = useTranslations();
   return (
     <MenuItem
       key="game-theme-music-change-music"
       onSelected={() => {
-        Navigation.Navigate(`/gamethememusic/${appId}`)
+        Navigation.Navigate(`/gamethememusic/${appId}`);
       }}
     >
       {t('changeThemeMusic')}...
     </MenuItem>
-  )
+  );
 }
 
-// Always add before "Properties...". If not found, skip insertion.
 const spliceChangeMusic = (children: any, appid: number | undefined) => {
-  if (!Array.isArray(children) || typeof appid !== 'number') return
+  if (!Array.isArray(children) || typeof appid !== 'number') return;
 
   try {
     const existingIdx = children.findIndex(
       (x: any) => x?.key === 'game-theme-music-change-music'
-    )
-    if (existingIdx !== -1) children.splice(existingIdx, 1)
+    );
+    if (existingIdx !== -1) children.splice(existingIdx, 1);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (_) {
     // no-op
   }
 
-  let insertIdx = -1
+  let insertIdx = -1;
   try {
     insertIdx = children.findIndex((item: any) =>
       findInReactTree(
         item,
-        (x: any) => x?.onSelected && x.onSelected.toString().includes('AppProperties')
+        (x: any) =>
+          x?.onSelected && x.onSelected.toString().includes('AppProperties')
       )
-    )
+    );
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (_) {
-    insertIdx = -1
+    insertIdx = -1;
   }
 
-  if (insertIdx < 0) return
-  children.splice(insertIdx, 0, <ChangeMusicButton appId={appid} />)
-}
+  if (insertIdx < 0) return;
+  children.splice(insertIdx, 0, <ChangeMusicButton appId={appid} />);
+};
 
-/**
- * Patches the game context menu.
- * @param LibraryContextMenu The game context menu.
- * @returns A patch to remove when the plugin dismounts.
- */
 const contextMenuPatch = (LibraryContextMenu: any) => {
   const patches: {
-    outer?: Patch
-    inner?: Patch
-    unpatch: () => void
+    outer?: Patch;
+    inner?: Patch;
+    unpatch: () => void;
   } = {
     unpatch: () => {
-      return null
+      return null;
     }
-  }
+  };
   patches.outer = afterPatch(
     LibraryContextMenu.prototype,
     'render',
     (_: Record<string, unknown>[], component: any) => {
-      let appid: number | undefined
+      let appid: number | undefined;
       try {
-        appid = component?._owner?.pendingProps?.overview?.appid
+        appid = component?._owner?.pendingProps?.overview?.appid;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (_) {
-        appid = undefined
+        appid = undefined;
       }
 
-      // Oct 2025 client
       if (typeof appid !== 'number') {
         try {
           const found = findInTree(
             component?.props?.children,
             (x: any) => x?.app?.appid,
             { walkable: ['props', 'children'] }
-          )
-          if (found?.app?.appid) appid = found.app.appid
+          );
+          if (found?.app?.appid) appid = found.app.appid;
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (_) {
           // no-op
         }
@@ -99,72 +97,75 @@ const contextMenuPatch = (LibraryContextMenu: any) => {
           component.type?.prototype ?? component,
           'shouldComponentUpdate',
           ([nextProps]: any, shouldUpdate: any) => {
-            const nextChildren = nextProps?.children
-            if (!Array.isArray(nextChildren)) return shouldUpdate
+            const nextChildren = nextProps?.children;
+            if (!Array.isArray(nextChildren)) return shouldUpdate;
 
             try {
               const gtmIdx = nextChildren.findIndex(
                 (x: any) => x?.key === 'game-theme-music-change-music'
-              )
-              if (gtmIdx !== -1) nextChildren.splice(gtmIdx, 1)
+              );
+              if (gtmIdx !== -1) nextChildren.splice(gtmIdx, 1);
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
             } catch (_) {
-              return shouldUpdate
+              return shouldUpdate;
             }
 
             if (shouldUpdate === true) {
-              let updatedAppid: number | undefined = appid
+              let updatedAppid: number | undefined = appid;
               try {
                 const parentOverview = nextChildren.find(
                   (x: any) => x?._owner?.pendingProps?.overview?.appid
-                )
-                if (typeof parentOverview?._owner?.pendingProps?.overview?.appid === 'number') {
-                  updatedAppid = parentOverview._owner.pendingProps.overview.appid
+                );
+                if (
+                  typeof parentOverview?._owner?.pendingProps?.overview
+                    ?.appid === 'number'
+                ) {
+                  updatedAppid =
+                    parentOverview._owner.pendingProps.overview.appid;
                 }
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
               } catch (_) {
                 // no-op
               }
 
-              // Oct 2025 client
               if (typeof updatedAppid !== 'number') {
                 try {
                   const found = findInTree(
                     nextChildren,
                     (x: any) => x?.app?.appid,
                     { walkable: ['props', 'children'] }
-                  )
-                  if (found?.app?.appid) updatedAppid = found.app.appid
+                  );
+                  if (found?.app?.appid) updatedAppid = found.app.appid;
+                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
                 } catch (_) {
                   // no-op
                 }
               }
 
-              spliceChangeMusic(nextChildren, updatedAppid)
+              spliceChangeMusic(nextChildren, updatedAppid);
             }
 
-            return shouldUpdate
+            return shouldUpdate;
           }
-        )
+        );
       } else {
-        const compChildren = component?.props?.children
-        spliceChangeMusic(compChildren, appid)
+        const compChildren = component?.props?.children;
+        spliceChangeMusic(compChildren, appid);
       }
 
-      return component
+      return component;
     }
-  )
+  );
   patches.unpatch = () => {
-    patches.outer?.unpatch()
-    patches.inner?.unpatch()
-  }
-  return patches
-}
+    patches.outer?.unpatch();
+    patches.inner?.unpatch();
+  };
+  return patches;
+};
 
-/**
- * Game context menu component.
- */
 export const LibraryContextMenu = fakeRenderComponent(
   findModuleChild((m: any) => {
-    if (typeof m !== 'object') return
+    if (typeof m !== 'object') return;
     for (const prop in m) {
       if (
         m[prop]?.toString() &&
@@ -174,11 +175,11 @@ export const LibraryContextMenu = fakeRenderComponent(
           (sibling) =>
             sibling?.toString().includes('createElement') &&
             sibling?.toString().includes('navigator:')
-        )
+        );
       }
     }
-    return
+    return;
   })
-).type
+).type;
 
-export default contextMenuPatch
+export default contextMenuPatch;

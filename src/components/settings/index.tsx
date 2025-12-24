@@ -1,7 +1,6 @@
 import {
   ButtonItem,
   ConfirmModal,
-  DropdownItem,
   Menu,
   MenuItem,
   PanelSection,
@@ -10,22 +9,19 @@ import {
   showContextMenu,
   showModal,
   ShowModalResult,
-  SingleDropdownOption,
   SliderField,
   ToggleField
-} from '@decky/ui'
-import { useMemo } from 'react'
-import { SiCrowdin, SiDiscord, SiGithub, SiKofi } from "react-icons/si";
-import { useSettings } from '../../hooks/useSettings'
-import useTranslations from '../../hooks/useTranslations'
+} from '@decky/ui';
+import { SiCrowdin, SiDiscord, SiGithub, SiKofi } from 'react-icons/si';
+import { useSettings } from '../../hooks/useSettings';
+import useTranslations from '../../hooks/useTranslations';
 import {
   FaDownload,
   FaUndo,
   FaSave,
   FaVolumeMute,
-  FaVolumeUp,
-  FaYoutube,
-} from 'react-icons/fa'
+  FaVolumeUp
+} from 'react-icons/fa';
 import {
   clearCache,
   clearDownloads,
@@ -33,36 +29,15 @@ import {
   getFullCache,
   importCache,
   listCacheBackups
-} from '../../cache/musicCache'
-import useInvidiousInstances from '../../hooks/useInvidiousInstances'
-import { toaster } from '@decky/api'
-import { getResolver } from '../../actions/audio'
-import PanelSocialButton from './socialButton'
+} from '../../cache/musicCache';
+import { toaster } from '@decky/api';
+import { getResolver } from '../../actions/audio';
+import PanelSocialButton from './socialButton';
 
 export default function Index() {
-  const {
-    settings,
-    isLoading: settingsIsLoading,
-    setDefaultMuted,
-    setUseYtDlp,
-    setDownloadAudio,
-    setInvidiousInstance,
-    setVolume
-  } = useSettings()
+  const { settings, setDefaultMuted, setVolume } = useSettings();
 
-  const t = useTranslations()
-
-  const { instances, instancesLoading } = useInvidiousInstances()
-  console.log(instances)
-
-  const instanceOptions = useMemo<SingleDropdownOption[]>(
-    () =>
-      instances.map((ins) => ({
-        data: ins.url,
-        label: ins.name
-      })),
-    [instances]
-  )
+  const t = useTranslations();
 
   const confirmClearCache = () => {
     showModal(
@@ -71,8 +46,8 @@ export default function Index() {
         strDescription={t('deleteOverridesDescription')}
         onOK={clearCache}
       />
-    )
-  }
+    );
+  };
 
   const confirmClearDownloads = () => {
     showModal(
@@ -80,11 +55,11 @@ export default function Index() {
         strTitle={t('deleteDownloadsConfirm')}
         onOK={clearDownloads}
       />
-    )
-  }
+    );
+  };
 
   const confirmRestoreDownloads = async () => {
-    const num = Object.values(await getFullCache()).length
+    const num = Object.values(await getFullCache()).length;
     const modal = showModal(
       <ConfirmModal
         strTitle={t('restoreDownloadsConfirm')}
@@ -93,8 +68,8 @@ export default function Index() {
         })}
         onOK={() => restoreDownloads(modal)}
       />
-    )
-  }
+    );
+  };
 
   function restoreCache(backup: string) {
     showModal(
@@ -102,22 +77,22 @@ export default function Index() {
         strTitle={t('restoreOverridesConfirm')}
         strDescription={t('restoreOverridesConfirmDetails')}
         onOK={async () => {
-          await importCache(backup)
+          await importCache(backup);
           toaster.toast({
             title: t('restoreSuccessful'),
             body: t('restoreSuccessfulDetails'),
             icon: <FaUndo />,
             duration: 1500
-          })
+          });
         }}
       />
-    )
+    );
   }
 
   async function restoreDownloads(modal: ShowModalResult) {
     function getProgressModal(index: number, total: number) {
-      const current = index + 1
-      const progress = (current * 100) / total
+      const current = index + 1;
+      const progress = (current * 100) / total;
       return (
         <ConfirmModal
           bHideCloseIcon={true}
@@ -146,26 +121,26 @@ export default function Index() {
             </div>
           }
         ></ConfirmModal>
-      )
+      );
     }
 
-    const cached = Object.values(await getFullCache())
-    const resolver = getResolver(settings.useYtDlp)
+    const cached = Object.values(await getFullCache());
+    const resolver = getResolver('ytdlp');
 
     for (let index = 0; index < cached.length; index++) {
-      const element = cached[index]
+      const element = cached[index];
       if (element.videoId !== undefined) {
-        modal.Update(getProgressModal(index, cached.length))
-        await resolver.downloadAudio({ id: element.videoId })
+        modal.Update(getProgressModal(index, cached.length));
+        await resolver.downloadAudio({ id: element.videoId });
       }
     }
-    modal.Close()
+    modal.Close();
     toaster.toast({
       title: t('downloadRestoreSuccessful'),
       body: t('downloadRestoreSuccessfulDetails'),
       icon: <FaDownload />,
       duration: 1500
-    })
+    });
   }
 
   return (
@@ -177,7 +152,7 @@ export default function Index() {
             description={t('volumeDescription')}
             value={settings.volume * 100}
             onChange={(newVal: number) => {
-              setVolume(newVal / 100)
+              setVolume(newVal / 100);
             }}
             min={0}
             max={100}
@@ -193,52 +168,9 @@ export default function Index() {
             label={t('defaultMuted')}
             description={t('defaultMutedDescription')}
             onChange={(newVal: boolean) => {
-              setDefaultMuted(newVal)
+              setDefaultMuted(newVal);
             }}
           />
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ToggleField
-            icon={<FaYoutube />}
-            checked={settings.useYtDlp}
-            label={t('useYtDlp')}
-            description={t('useYtDlpDescription')}
-            onChange={(newVal: boolean) => {
-              setUseYtDlp(newVal)
-            }}
-          />
-        </PanelSectionRow>
-        {!settings.useYtDlp && (
-          <PanelSectionRow>
-            <DropdownItem
-              disabled={
-                instancesLoading ||
-                !instanceOptions?.length ||
-                settingsIsLoading
-              }
-              label={t('invidiousInstance')}
-              description={t('invidiousInstanceDescription')}
-              menuLabel={t('invidiousInstance')}
-              rgOptions={instanceOptions}
-              selectedOption={
-                instanceOptions.find(
-                  (o) => o.data === settings.invidiousInstance
-                )?.data
-              }
-              onChange={(newVal) => setInvidiousInstance(newVal.data)}
-            />
-          </PanelSectionRow>
-        )}
-        <PanelSectionRow>
-          <ToggleField
-            icon={<FaDownload />}
-            checked={settings.downloadAudio}
-            label={t('downloadAudio')}
-            description={t('downloadAudioDescription')}
-            onChange={(newVal: boolean) => {
-              setDownloadAudio(newVal)
-            }}
-          ></ToggleField>
         </PanelSectionRow>
         <PanelSectionRow>
           <ButtonItem
@@ -279,13 +211,13 @@ export default function Index() {
             bottomSeparator="none"
             layout="below"
             onClick={async () => {
-              await exportCache()
+              await exportCache();
               toaster.toast({
                 title: t('backupSuccessful'),
                 body: t('backupSuccessfulDetails'),
                 icon: <FaSave />,
                 duration: 1500
-              })
+              });
             }}
           >
             {t('backupOverrides')}
@@ -297,7 +229,7 @@ export default function Index() {
             bottomSeparator="none"
             layout="below"
             onClick={async () => {
-              const backups = await listCacheBackups()
+              const backups = await listCacheBackups();
               showContextMenu(
                 <Menu label={t('restoreOverridesLabel')}>
                   {backups.map((backup) => (
@@ -310,7 +242,7 @@ export default function Index() {
                     </MenuItem>
                   ))}
                 </Menu>
-              )
+              );
             }}
           >
             {t('restoreOverrides')}
@@ -318,11 +250,31 @@ export default function Index() {
         </PanelSectionRow>
       </PanelSection>
       <PanelSection title={t('extras')}>
-        <PanelSocialButton icon={<SiKofi fill="#FF5E5B" />} url="https://ko-fi.com/MegalonVII">Ko-fi</PanelSocialButton>
-        <PanelSocialButton icon={<SiDiscord fill="#5865F2" />} url="https://deckbrew.xyz/discord">Discord</PanelSocialButton>
-        <PanelSocialButton icon={<SiGithub fill="#f5f5f5" />} url="https://github.com/MegalonVII/SDH-GameThemeMusic/">Github</PanelSocialButton>
-        <PanelSocialButton icon={<SiCrowdin fill="#FFFFFF" />} url="https://crowdin.com/project/sdh-gamethememusic">{t('helpTranslate')}</PanelSocialButton>
+        <PanelSocialButton
+          icon={<SiKofi fill="#FF5E5B" />}
+          url="https://ko-fi.com/Nytuo"
+        >
+          Ko-fi
+        </PanelSocialButton>
+        <PanelSocialButton
+          icon={<SiDiscord fill="#5865F2" />}
+          url="https://deckbrew.xyz/discord"
+        >
+          Discord
+        </PanelSocialButton>
+        <PanelSocialButton
+          icon={<SiGithub fill="#f5f5f5" />}
+          url="https://github.com/Nytuo/SDH-GameThemeMusic/"
+        >
+          Github
+        </PanelSocialButton>
+        <PanelSocialButton
+          icon={<SiCrowdin fill="#FFFFFF" />}
+          url="https://crowdin.com/project/sdh-gamethememusic"
+        >
+          {t('helpTranslate')}
+        </PanelSocialButton>
       </PanelSection>
     </div>
-  )
+  );
 }

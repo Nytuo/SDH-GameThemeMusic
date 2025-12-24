@@ -1,13 +1,12 @@
-import { DialogButton, Focusable } from '@decky/ui'
-import { useEffect, useState } from 'react'
-import useTranslations from '../../hooks/useTranslations'
-import { getResolver } from '../../actions/audio'
-import { YouTubeVideoPreview } from '../../../types/YouTube'
-import { FaCheck } from 'react-icons/fa'
-import Spinner from '../spinner'
-import useAudioPlayer from '../../hooks/useAudioPlayer'
-import { useSettings } from '../../hooks/useSettings'
-
+import { DialogButton, Focusable } from '@decky/ui';
+import { useEffect, useState } from 'react';
+import useTranslations from '../../hooks/useTranslations';
+import { getResolverForVideoId } from '../../actions/audio';
+import { YouTubeVideoPreview } from '../../../types/YouTube';
+import { FaCheck } from 'react-icons/fa';
+import { SiYoutubemusic, SiItunes } from 'react-icons/si';
+import Spinner from '../spinner';
+import useAudioPlayer from '../../hooks/useAudioPlayer';
 export default function AudioPlayer({
   handlePlay,
   selected,
@@ -15,68 +14,109 @@ export default function AudioPlayer({
   video,
   volume
 }: {
-  video: YouTubeVideoPreview & { isPlaying: boolean }
-  volume: number
-  handlePlay: (startPlaying: boolean) => void
-  selected: boolean
+  video: YouTubeVideoPreview & { isPlaying: boolean };
+  volume: number;
+  handlePlay: (startPlaying: boolean) => void;
+  selected: boolean;
   selectNewAudio: (audio: {
-    title: string
-    videoId: string
-    audioUrl: string
-  }) => Promise<void>
+    title: string;
+    videoId: string;
+    audioUrl: string;
+  }) => Promise<void>;
 }) {
-  const t = useTranslations()
-  // If the URL is defined already, we don't need to load anything here.
-  const [loading, setLoading] = useState(video.url === undefined)
-  const [downloading, setDownloading] = useState(false)
-  const [audioUrl, setAudio] = useState<string | undefined>()
-  const { settings, isLoading: settingsLoading } = useSettings()
-
-  const audioPlayer = useAudioPlayer(audioUrl)
+  const t = useTranslations();
+  const [loading, setLoading] = useState(video.url === undefined);
+  const [downloading, setDownloading] = useState(false);
+  const [audioUrl, setAudio] = useState<string | undefined>();
+  const audioPlayer = useAudioPlayer(audioUrl);
 
   useEffect(() => {
     async function getData() {
-      const resolver = getResolver(settings.useYtDlp)
-      setLoading(true)
-      const res = await resolver.getAudioUrlFromVideo(video)
-      setAudio(res)
-      setLoading(false)
+      const resolver = getResolverForVideoId(video.id);
+      setLoading(true);
+      const res = await resolver.getAudioUrlFromVideo(video);
+      setAudio(res);
+      setLoading(false);
     }
-    if (video.id.length && !settingsLoading) {
-      getData()
+    if (video.id.length) {
+      getData().then(() => {
+        return;
+      });
     }
-  }, [video.id, settingsLoading])
+  }, [video.id]);
 
   useEffect(() => {
     if (audioPlayer.isReady) {
-      audioPlayer.setVolume(volume)
+      audioPlayer.setVolume(volume);
     }
-  }, [audioPlayer.isReady, volume])
+  }, [audioPlayer.isReady, volume]);
 
   useEffect(() => {
     if (audioPlayer.isReady) {
-      if (video.isPlaying) audioPlayer.play()
-      else audioPlayer.stop()
+      if (video.isPlaying) audioPlayer.play();
+      else audioPlayer.stop();
     }
-  }, [video.isPlaying])
+  }, [video.isPlaying]);
 
   function togglePlay() {
-    handlePlay(!video.isPlaying)
+    handlePlay(!video.isPlaying);
   }
 
   async function selectAudio() {
     if (audioUrl?.length && video.id.length) {
-      setDownloading(true)
+      setDownloading(true);
       await selectNewAudio({
         title: video.title,
         videoId: video.id,
         audioUrl: audioUrl
-      })
-      setDownloading(false)
+      });
+      setDownloading(false);
     }
   }
 
-  if (!loading && !audioUrl) return <></>
+  if (!loading && !audioUrl) return <></>;
+  const isItunes = video.id?.startsWith('itunes_');
+  const badge = isItunes ? (
+    <div
+      style={{
+        position: 'absolute',
+        top: 6,
+        left: 6,
+        background: 'rgba(255,255,255,0.85)',
+        borderRadius: '4px',
+        padding: '2px 6px',
+        display: 'flex',
+        alignItems: 'center',
+        fontSize: '12px',
+        fontWeight: 600,
+        color: '#d82d2d',
+        zIndex: 2
+      }}
+    >
+      <SiItunes size={16} style={{ marginRight: 4 }} />
+      iTunes
+    </div>
+  ) : (
+    <div
+      style={{
+        position: 'absolute',
+        top: 6,
+        left: 6,
+        background: 'rgba(255,255,255,0.85)',
+        borderRadius: '4px',
+        padding: '2px 6px',
+        display: 'flex',
+        alignItems: 'center',
+        fontSize: '12px',
+        fontWeight: 600,
+        color: '#e62117',
+        zIndex: 2
+      }}
+    >
+      <SiYoutubemusic size={16} style={{ marginRight: 4 }} />
+      YouTube
+    </div>
+  );
   return (
     <div>
       <Focusable
@@ -93,26 +133,32 @@ export default function AudioPlayer({
         <div
           style={{
             position: 'relative',
-            width: '230px',
-            height: 0,
-            paddingBottom: '56.25%',
-            overflow: 'hidden'
+            width: '100%',
+            aspectRatio: isItunes ? '1/1' : '16/9',
+            maxWidth: '230px',
+            margin: '0 auto',
+            overflow: 'hidden',
+            background: '#222',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
         >
           <img
             src={video.thumbnail}
             alt={video.title}
             style={{
-              overflow: 'hidden',
-              width: '230px',
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
               borderRadius: '6px',
-              position: 'absolute',
-              top: '50%',
-              left: 0,
-              transform: 'translateY(-50%)',
-              height: 'auto'
+              display: 'block',
+              aspectRatio: isItunes ? '1/1' : '16/9',
+              background: '#222'
             }}
           />
+          {badge}
         </div>
         <p
           style={{
@@ -161,11 +207,7 @@ export default function AudioPlayer({
                 focusable={!selected && !loading}
                 onClick={selectAudio}
               >
-                {selected
-                  ? t('selected')
-                  : settings.downloadAudio
-                    ? t('download')
-                    : t('select')}
+                {selected ? t('selected') : t('download')}
               </DialogButton>
               {selected ? (
                 <div
@@ -193,5 +235,5 @@ export default function AudioPlayer({
         )}
       </Focusable>
     </div>
-  )
+  );
 }

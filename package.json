@@ -1,46 +1,54 @@
 {
   "name": "sdh-gamethememusic",
-  "version": "1.7.2",
+  "version": "2.0.0",
   "description": "Play theme songs on your game pages",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:local": "node build-local.cjs",
+    "test": "echo \"We don't do that here\" && exit 1"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MegalonVII/SDH-GameThemeMusic.git"
+    "url": "git+https://github.com/Nytuo/SDH-GameThemeMusic.git"
   },
   "keywords": [
     "decky",
     "plugin",
     "plugin-template",
     "steam-deck",
-    "deck"
+    "deck",
+    "steam",
+    "Big Picture"
   ],
-  "author": "OMGDuke, MegalonVII",
+  "author": "OMGDuke, MegalonVII, Nytuo",
   "license": "GPL-2.0-or-later",
   "bugs": {
-    "url": "https://github.com/MegalonVII/SDH-GameThemeMusic/issues"
+    "url": "https://github.com/Nytuo/SDH-GameThemeMusic/issues"
   },
-  "homepage": "https://github.com/MegalonVII/SDH-GameThemeMusic#readme",
+  "homepage": "https://github.com/Nytuo/SDH-GameThemeMusic#readme",
   "remote_binary": [
     {
       "name": "yt-dlp",
-      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2025.10.22/yt-dlp",
-      "sha256hash": "fd99687645340163094d8b21390c59102900f3e7bcdd1fc0112622bf72989d4f"
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2025.12.08/yt-dlp",
+      "sha256hash": "aed043cabf6b352dfd5438afff595e31532538d5af7c8f4f95ced1e6f1b35c2a"
+    },
+    {
+      "name": "yt-dlp.exe",
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2025.12.08/yt-dlp.exe",
+      "sha256hash": "86c3280caa696b567c917ac138bbe0d17e45dc2b329f67562302ee4c3973a06f"
     }
   ],
   "devDependencies": {
     "@decky/rollup": "^1.0.1",
     "@decky/ui": "^4.8.2",
-    "@eslint/js": "^9.15.0",
+    "@eslint/js": "^9.39.2",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
     "@types/webpack": "^5.28.5",
     "eslint": "^9.15.0",
-    "eslint-config-prettier": "^9.1.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.2.1",
     "eslint-plugin-react": "^7.37.2",
     "prettier": "^3.4.1",
@@ -51,7 +59,6 @@
   },
   "dependencies": {
     "@decky/api": "^1.1.2",
-    "deno": "^2.5.4",
     "localforage": "^1.10.0",
     "qrcode.react": "^4.1.0",
     "react-icons": "^5.3.0",

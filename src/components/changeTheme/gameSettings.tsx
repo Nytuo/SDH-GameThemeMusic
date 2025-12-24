@@ -4,60 +4,67 @@ import {
   SliderField,
   PanelSectionRow,
   useParams
-} from '@decky/ui'
-import { useEffect, useState } from 'react'
-import { getCache, updateCache } from '../../cache/musicCache'
+} from '@decky/ui';
+import { useEffect, useState } from 'react';
+import { getCache, updateCache } from '../../cache/musicCache';
 
-import { getResolver } from '../../actions/audio'
-import useTranslations from '../../hooks/useTranslations'
-import { useSettings } from '../../hooks/useSettings'
-import { FaVolumeUp } from 'react-icons/fa'
-import Spinner from '../spinner'
-import useAudioPlayer from '../../hooks/useAudioPlayer'
+import { getResolverForVideoId } from '../../actions/audio';
+import useTranslations from '../../hooks/useTranslations';
+import { useSettings } from '../../hooks/useSettings';
+import { FaVolumeUp } from 'react-icons/fa';
+import Spinner from '../spinner';
+import useAudioPlayer from '../../hooks/useAudioPlayer';
 
 export default function GameSettings() {
-  const t = useTranslations()
-  const { settings, isLoading: settingsIsLoading } = useSettings()
-  const { appid } = useParams<{ appid: string }>()
-  const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid))
-  const appName = appDetails?.display_name
+  const t = useTranslations();
+  const { settings, isLoading: settingsIsLoading } = useSettings();
+  const { appid } = useParams<{ appid: string }>();
+  const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid));
+  const appName = appDetails?.display_name;
 
-  const [currentAudio, setCurrentAudio] = useState<string>()
-  const [themeVolume, setThemeVolume] = useState(settings.volume)
-  const [loading, setLoading] = useState(true)
+  const [currentAudio, setCurrentAudio] = useState<string>();
+  const [themeVolume, setThemeVolume] = useState(settings.volume);
+  const [loading, setLoading] = useState(true);
 
-  const audioPlayer = useAudioPlayer(currentAudio)
+  const audioPlayer = useAudioPlayer(currentAudio);
 
   useEffect(() => {
     async function getData() {
-      setLoading(true)
-      const resolver = getResolver(settings.useYtDlp)
-      const cache = await getCache(parseInt(appid))
+      setLoading(true);
+      const cache = await getCache(parseInt(appid));
       if (typeof cache?.volume === 'number' && isFinite(cache.volume)) {
-        setThemeVolume(cache.volume)
+        setThemeVolume(cache.volume);
       } else {
-        setThemeVolume(settings.volume)
+        setThemeVolume(settings.volume);
       }
       if (cache?.videoId?.length) {
+        const resolver = getResolverForVideoId(cache.videoId);
         const newAudio = await resolver.getAudioUrlFromVideo({
           id: cache?.videoId
-        })
-        setCurrentAudio(newAudio)
+        });
+        setCurrentAudio(newAudio);
       } else {
-        const newAudio = await resolver.getAudio(appName as string)
-        setCurrentAudio(newAudio?.audioUrl)
+        const resolver = getResolverForVideoId('');
+        const newAudio = await resolver.getAudio(appName as string);
+        setCurrentAudio(newAudio?.audioUrl);
       }
-      setLoading(false)
+      setLoading(false);
     }
     if (!settingsIsLoading) {
-      getData()
+      getData().then(() => {
+        return;
+      });
     }
-  }, [appid, settingsIsLoading])
+  }, [appid, settingsIsLoading]);
 
   function updateThemeVolume(newVol: number, reset?: boolean) {
-    setThemeVolume(newVol)
-    audioPlayer.setVolume(newVol)
-    updateCache(parseInt(appid), { volume: reset ? undefined : newVol })
+    setThemeVolume(newVol);
+    audioPlayer.setVolume(newVol);
+    updateCache(parseInt(appid), { volume: reset ? undefined : newVol }).then(
+      () => {
+        return;
+      }
+    );
   }
 
   return (
@@ -115,5 +122,5 @@ export default function GameSettings() {
         </DialogButton>
       </Focusable>
     </div>
-  )
+  );
 }
