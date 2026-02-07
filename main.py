@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import platform
+import re
 import ssl
 import sys
 from pathlib import Path
@@ -42,6 +43,11 @@ class Plugin:
         os.makedirs(self.cache_path, exist_ok=True)
         logger.info(f"Music path: {self.music_path}")
         logger.info(f"Cache path: {self.cache_path}")
+        
+        try:
+            await self.check_and_update_ytdlp()
+        except Exception as e:
+            logger.error(f"Error checking for yt-dlp updates: {e}")
 
     async def _unload(self):
         logger.info("Plugin unloading...")
@@ -87,6 +93,176 @@ class Plugin:
         if not self.is_windows:
             env["LD_LIBRARY_PATH"] = "/usr/lib:/usr/lib64:/lib:/lib64"
         return env
+
+    async def get_ytdlp_version(self) -> str | None:
+        """
+        Get the current yt-dlp version.
+        :return: str | None Version string or None if not available
+        """
+        ytdlp_path = self._get_ytdlp_path()
+        if not Path(ytdlp_path).exists():
+            logger.info("yt-dlp binary not found")
+            return None
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                ytdlp_path,
+                "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._get_env(),
+            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
+            if process.returncode == 0 and stdout:
+                version = stdout.decode().strip()
+                logger.info(f"Current yt-dlp version: {version}")
+                return version
+            return None
+        except Exception as e:
+            logger.error(f"Error getting yt-dlp version: {e}")
+            return None
+
+    async def get_latest_ytdlp_release(self) -> dict | None:
+        """
+        Get the latest yt-dlp release from GitHub.
+        :return: dict | None Release info or None if not available
+        """
+        logger.info("Checking for latest yt-dlp release on GitHub")
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+                headers = {"Accept": "application/vnd.github.v3+json"}
+                async with session.get(url, headers=headers, ssl=self.ssl_context) as res:
+                    res.raise_for_status()
+                    data = await res.json()
+                    tag_name = data.get("tag_name", "")
+                    logger.info(f"Latest yt-dlp release: {tag_name}")
+                    return {
+                        "version": tag_name,
+                        "assets": data.get("assets", [])
+                    }
+        except Exception as e:
+            logger.error(f"Error getting latest yt-dlp release: {e}")
+            return None
+
+    def _get_ytdlp_asset_name(self) -> str:
+        """
+        Get the appropriate yt-dlp asset name for the current platform.
+        :return: str Asset name
+        """
+        system = platform.system()
+        machine = platform.machine().lower()
+        
+        if system == "Windows":
+            return "yt-dlp.exe"
+        elif system == "Linux":
+            if machine in ["x86_64", "amd64"]:
+                return "yt-dlp_linux"
+            elif machine in ["aarch64", "arm64"]:
+                return "yt-dlp_linux_aarch64"
+            elif machine.startswith("arm"):
+                return "yt-dlp_linux_armv7l"
+        elif system == "Darwin":
+            if machine == "arm64":
+                return "yt-dlp_macos"
+            else:
+                return "yt-dlp_macos"
+        
+        logger.warning(f"Unknown platform {system}/{machine}, defaulting to yt-dlp_linux")
+        return "yt-dlp_linux"
+
+    async def download_ytdlp_binary(self, asset_url: str) -> bool:
+        """
+        Download yt-dlp binary from GitHub and replace the existing one.
+        :param asset_url: str URL to download the binary from
+        :return: bool Success status
+        """
+        logger.info(f"Downloading yt-dlp binary from: {asset_url}")
+        try:
+            bin_dir = Path(decky.DECKY_PLUGIN_DIR) / "bin"
+            bin_dir.mkdir(exist_ok=True)
+            
+            ytdlp_path = Path(self._get_ytdlp_path())
+            temp_path = ytdlp_path.with_suffix(".tmp")
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(asset_url, ssl=self.ssl_context) as res:
+                    res.raise_for_status()
+                    with open(temp_path, "wb") as f:
+                        async for chunk in res.content.iter_chunked(8192):
+                            f.write(chunk)
+            
+            if not self.is_windows:
+                temp_path.chmod(0o755)
+            
+            if ytdlp_path.exists():
+                ytdlp_path.unlink()
+            temp_path.rename(ytdlp_path)
+            
+            logger.info(f"Successfully downloaded and installed yt-dlp binary to {ytdlp_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Error downloading yt-dlp binary: {e}")
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+            return False
+
+    async def check_and_update_ytdlp(self) -> bool:
+        """
+        Check for new yt-dlp release and update if available.
+        :return: bool True if updated, False otherwise
+        """
+        logger.info("Checking for yt-dlp updates")
+        
+        current_version = await self.get_ytdlp_version()
+        latest_release = await self.get_latest_ytdlp_release()
+        
+        if latest_release is None:
+            logger.warning("Could not get latest release info")
+            return False
+        
+        latest_version = latest_release["version"]
+        
+        if current_version is None:
+            logger.info("No existing yt-dlp binary, downloading latest")
+            needs_update = True
+        else:
+            current = current_version.lstrip('v')
+            latest = latest_version.lstrip('v')
+            
+            if current == latest:
+                logger.info(f"yt-dlp is up to date ({current_version})")
+                return False
+            
+            logger.info(f"New yt-dlp version available: {current_version} -> {latest_version}")
+            needs_update = True
+        
+        if needs_update:
+            asset_name = self._get_ytdlp_asset_name()
+            logger.info(f"Looking for asset: {asset_name}")
+            
+            asset_url = None
+            for asset in latest_release["assets"]:
+                if asset["name"] == asset_name:
+                    asset_url = asset["browser_download_url"]
+                    break
+            
+            if asset_url is None:
+                logger.error(f"Could not find asset {asset_name} in release")
+                return False
+            
+            if await self.download_ytdlp_binary(asset_url):
+                new_version = await self.get_ytdlp_version()
+                logger.info(f"yt-dlp updated successfully to version {new_version}")
+                return True
+            else:
+                logger.error("Failed to update yt-dlp")
+                return False
+        
+        return False
 
     async def search_yt(self, term: str):
         """Search YouTube using yt-dlp."""
