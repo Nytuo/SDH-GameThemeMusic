@@ -1,67 +1,83 @@
 import { call } from '@decky/api';
-import { useEffect, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 
 export type Settings = {
   defaultMuted: boolean;
   volume: number;
+  homepageFocusMode: boolean;
 };
 
 export const defaultSettings: Settings = {
   defaultMuted: false,
-  volume: 1
+  volume: 1,
+  homepageFocusMode: false
 };
 
-export const useSettings = () => {
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+let _settings: Settings = { ...defaultSettings };
+let _loaded = false;
+let _loadPromise: Promise<void> | null = null;
+const _subscribers = new Set<() => void>();
 
-  const [isLoading, setIsLoading] = useState(true);
+function notifyAll() {
+  _subscribers.forEach((fn) => fn());
+}
+
+function loadSettings() {
+  if (_loadPromise) return _loadPromise;
+  _loadPromise = call<[string, Settings], Settings>(
+    'get_setting',
+    'settings',
+    defaultSettings
+  ).then((saved) => {
+    _settings = saved;
+    _loaded = true;
+    notifyAll();
+  });
+  return _loadPromise;
+}
+
+function saveSettings(
+  key: keyof Settings,
+  value: Settings[keyof Settings]
+): void {
+  _settings = { ..._settings, [key]: value };
+
+  notifyAll();
+  call<[string, Settings], Settings>(
+    'set_setting',
+    'settings',
+    _settings
+  ).catch(console.error);
+}
+
+export const useSettings = () => {
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
   useEffect(() => {
-    const getData = async () => {
-      setIsLoading(true);
-      const savedSettings = await call<[string, Settings], Settings>(
-        'get_setting',
-        'settings',
-        settings
-      );
-      setSettings(savedSettings);
-      setIsLoading(false);
+    _subscribers.add(forceUpdate);
+    if (!_loaded) {
+      loadSettings();
+    }
+    return () => {
+      _subscribers.delete(forceUpdate);
     };
-    getData().then(() => {
-      return;
-    });
   }, []);
 
-  async function updateSettings(
-    key: keyof Settings,
-    value: Settings[keyof Settings]
-  ) {
-    setSettings((oldSettings) => {
-      const newSettings = { ...oldSettings, [key]: value };
-      call<[string, Settings], Settings>(
-        'set_setting',
-        'settings',
-        newSettings
-      ).catch(console.error);
-      return newSettings;
-    });
-  }
-
   function setDefaultMuted(value: Settings['defaultMuted']) {
-    updateSettings('defaultMuted', value).then(() => {
-      return;
-    });
+    saveSettings('defaultMuted', value);
   }
   function setVolume(value: Settings['volume']) {
-    updateSettings('volume', value).then(() => {
-      return;
-    });
+    saveSettings('volume', value);
+  }
+  function setHomepageFocusMode(value: Settings['homepageFocusMode']) {
+    saveSettings('homepageFocusMode', value);
   }
 
   return {
-    settings,
+    settings: _settings,
     setDefaultMuted,
     setVolume,
-    isLoading
+    setHomepageFocusMode,
+    isLoading: !_loaded
   };
 };

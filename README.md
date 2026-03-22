@@ -5,9 +5,10 @@
 <h2>Game Theme Music</h2>
   Play theme songs on your game pages. Compatible with AudioLoader and Decky Loader.
 
-  <a href="https://github.com/Nytuo/SDH-GameThemeMusic/issues/new?assignees=&labels=bug&template=01_BUG_REPORT.md&title=bug%3A+">Report a Bug</a> | 
-  <a href="https://github.com/Nytuo/SDH-GameThemeMusic/issues/new?assignees=&labels=enhancement&template=02_FEATURE_REQUEST.md&title=feat%3A+">Request a Feature</a> |
-  <a href="https://github.com/Nytuo/SDH-GameThemeMusic/discussions">Ask a Question</a>
+<a href="https://github.com/Nytuo/SDH-GameThemeMusic/issues/new?assignees=&labels=bug&template=01_BUG_REPORT.md&title=bug%3A+">Report a Bug</a> |
+<a href="https://github.com/Nytuo/SDH-GameThemeMusic/issues/new?assignees=&labels=enhancement&template=02_FEATURE_REQUEST.md&title=feat%3A+">Request a Feature</a> |
+<a href="https://github.com/Nytuo/SDH-GameThemeMusic/discussions">Ask a Question</a>
+
 </div>
 
 <div align="center">
@@ -43,7 +44,8 @@ Game Theme Music is a Decky Loader plugin for Steam Deck and desktop Big Picture
 
 ## What The Fork?
 
-I have decided to make my own fork of this project to add new features that I wanted such like: 
+I have decided to make my own fork of this project to add new features that I wanted such like:
+
 - Windows support
 - Additional music providers (but removing Invidious cause I don't like it)
 - Add local Music file support
@@ -83,8 +85,8 @@ Since this plugin is not available in the Decky Loader plugin store, you will ne
    - On SteamOS (including Steam Deck): `~/.homebrew/plugins/`
    - On Windows: `%USER%\homebrew\plugins\`
 5. Add `yt-dlp` binary under the bin folder in the plugin folder for proper YouTube support. (windows or linux version depending on your OS)
-5. Restart Decky Loader or Steam Deck to load the new plugin.
-6. Enjoy your game theme music!
+6. Restart Decky Loader or Steam Deck to load the new plugin.
+7. Enjoy your game theme music!
 
 Or, for manual build:
 
@@ -114,7 +116,6 @@ Usage of multiple providers like YouTube and iTunes.
 
 ![Screenshot 3](./assets/screenshot_3.png)
 Can use locally stored music files.
-
 
 ## Contributing
 

@@ -6,15 +6,22 @@ import { useSettings } from '../../hooks/useSettings';
 import { getCache } from '../../cache/musicCache';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
 
-export default function ThemePlayer(): ReactElement {
+export default function ThemePlayer({
+  appid: propAppId
+}: { appid?: number } = {}): ReactElement {
   const { settings, isLoading: settingsIsLoading } = useSettings();
-  const { appid } = useParams<{ appid: string }>();
-  const { audio } = useThemeMusic(parseInt(appid));
+  const { appid: paramAppId } = useParams<{ appid: string }>();
+  const appid =
+    propAppId !== undefined ? propAppId : parseInt(paramAppId ?? '0');
+
+  const isDetailPage = propAppId === undefined;
+  const shouldPlay = !isDetailPage || !settings.homepageFocusMode;
+  const { audio } = useThemeMusic(shouldPlay ? appid : 0);
   const audioPlayer = useAudioPlayer(audio.audioUrl);
 
   useEffect(() => {
     async function getData() {
-      const cache = await getCache(parseInt(appid));
+      const cache = await getCache(appid);
       if (typeof cache?.volume === 'number' && isFinite(cache.volume)) {
         audioPlayer.setVolume(cache.volume);
       } else {

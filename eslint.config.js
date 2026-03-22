@@ -23,7 +23,8 @@ export default [
   {
     files: ['src/**/*.{js,mjs,cjs,ts,jsx,tsx}'],
     rules: {
-      'react/react-in-jsx-scope': 'off'
+      'react/react-in-jsx-scope': 'off',
+      '@typescript-eslint/no-explicit-any': 'off'
     }
   }
 ];

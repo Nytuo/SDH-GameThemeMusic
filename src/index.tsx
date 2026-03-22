@@ -5,6 +5,7 @@ import { GiMusicalNotes } from 'react-icons/gi';
 
 import Settings from './components/settings';
 import patchLibraryApp from './lib/patchLibraryApp';
+import FocusedGameThemePlayer from './components/focusedGameThemePlayer';
 import patchContextMenu, { LibraryContextMenu } from './lib/patchContextMenu';
 import ChangeTheme from './components/changeTheme';
 import {
@@ -17,6 +18,16 @@ import { name } from '@decky/manifest';
 export default definePlugin(() => {
   const state: AudioLoaderCompatState = new AudioLoaderCompatState();
   const libraryPatch = patchLibraryApp(state);
+
+  const focusedState: AudioLoaderCompatState = new AudioLoaderCompatState();
+  const GlobalPlayer = () => (
+    <AudioLoaderCompatStateContextProvider
+      AudioLoaderCompatStateClass={focusedState}
+    >
+      <FocusedGameThemePlayer />
+    </AudioLoaderCompatStateContextProvider>
+  );
+  routerHook.addGlobalComponent('GTMFocusedPlayer', GlobalPlayer);
 
   routerHook.addRoute(
     '/gamethememusic/:appid',
@@ -59,6 +70,7 @@ export default definePlugin(() => {
       AppStateRegistrar.unregister();
       routerHook.removePatch('/library/app/:appid', libraryPatch);
       routerHook.removeRoute('/gamethememusic/:appid');
+      routerHook.removeGlobalComponent('GTMFocusedPlayer');
       patchedMenu?.unpatch();
     }
   };

@@ -35,7 +35,8 @@ import { getResolver } from '../../actions/audio';
 import PanelSocialButton from './socialButton';
 
 export default function Index() {
-  const { settings, setDefaultMuted, setVolume } = useSettings();
+  const { settings, setDefaultMuted, setVolume, setHomepageFocusMode } =
+    useSettings();
 
   const t = useTranslations();
 
@@ -169,6 +170,16 @@ export default function Index() {
             description={t('defaultMutedDescription')}
             onChange={(newVal: boolean) => {
               setDefaultMuted(newVal);
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            checked={settings.homepageFocusMode}
+            label={t('homepageFocusMode')}
+            description={t('homepageFocusModeDescription')}
+            onChange={(newVal: boolean) => {
+              setHomepageFocusMode(newVal);
             }}
           />
         </PanelSectionRow>

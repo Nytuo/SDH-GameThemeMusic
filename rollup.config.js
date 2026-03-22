@@ -1,8 +1,8 @@
-import { readFileSync } from 'fs'
-import externalGlobals from 'rollup-plugin-external-globals'
-import deckyPlugin from '@decky/rollup'
+import { readFileSync } from 'fs';
+import externalGlobals from 'rollup-plugin-external-globals';
+import deckyPlugin from '@decky/rollup';
 
-const pkg = JSON.parse(readFileSync('./package.json', 'utf8'))
+const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
 
 export default deckyPlugin({
   output: {
@@ -13,4 +13,4 @@ export default deckyPlugin({
       '@decky/pkg': JSON.stringify(pkg)
     })
   ]
-})
+});
