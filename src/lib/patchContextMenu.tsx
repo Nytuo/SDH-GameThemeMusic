@@ -66,6 +66,11 @@ const contextMenuPatch = (LibraryContextMenu: any) => {
       return null;
     }
   };
+
+  if (!LibraryContextMenu) {
+    return patches;
+  }
+
   patches.outer = afterPatch(
     LibraryContextMenu.prototype,
     'render',
@@ -163,23 +168,25 @@ const contextMenuPatch = (LibraryContextMenu: any) => {
   return patches;
 };
 
-export const LibraryContextMenu = fakeRenderComponent(
-  findModuleChild((m: any) => {
-    if (typeof m !== 'object') return;
-    for (const prop in m) {
-      if (
-        m[prop]?.toString() &&
-        m[prop].toString().includes('().LibraryContextMenu')
-      ) {
-        return Object.values(m).find(
-          (sibling) =>
-            sibling?.toString().includes('createElement') &&
-            sibling?.toString().includes('navigator:')
-        );
-      }
+const libraryContextMenuModule = findModuleChild((m: any) => {
+  if (typeof m !== 'object' || m === null) return;
+  for (const prop in m) {
+    if (
+      typeof m[prop] === 'function' &&
+      m[prop].toString().includes('().LibraryContextMenu')
+    ) {
+      return (Object.values(m) as any[]).find(
+        (sibling) =>
+          typeof sibling === 'function' &&
+          sibling.toString().includes('navigator:')
+      );
     }
-    return;
-  })
-).type;
+  }
+  return;
+});
+
+export const LibraryContextMenu = libraryContextMenuModule
+  ? fakeRenderComponent(libraryContextMenuModule).type
+  : null;
 
 export default contextMenuPatch;
