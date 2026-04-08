@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAudioLoaderCompatState } from '../state/AudioLoaderCompatState';
+import GlobalAudioPlayer from '../lib/globalAudioPlayer';
 
 const useAudioPlayer = (
   audioUrl: string | undefined
@@ -12,37 +13,49 @@ const useAudioPlayer = (
   isPlaying: boolean;
   isReady: boolean;
 } => {
-  const { setOnThemePage, onAppPage } = useAudioLoaderCompatState();
-  if (!onAppPage) {
-    setOnThemePage(true);
-  }
+  const { setOnThemePage, registerAudioPlayer, unregisterAudioPlayer } =
+    useAudioLoaderCompatState();
 
   const audioPlayer: HTMLAudioElement = useMemo(() => {
-    const audio = new Audio();
-    audio.preload = 'auto';
-    return audio;
+    return GlobalAudioPlayer.getInstance().getAudioElement();
   }, []);
 
-  audioPlayer.oncanplaythrough = () => {
-    setIsReady(true);
+  useEffect(() => {
     setOnThemePage(true);
-  };
+  }, []);
+
+  useEffect(() => {
+    registerAudioPlayer(audioPlayer);
+    return () => {
+      unregisterAudioPlayer(audioPlayer);
+    };
+  }, [audioPlayer]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     if (audioUrl?.length) {
-      audioPlayer.src = audioUrl;
-      audioPlayer.loop = true;
+      if (audioPlayer.src !== audioUrl) {
+        setIsReady(false);
+        audioPlayer.src = audioUrl;
+        audioPlayer.loop = true;
+      }
     }
   }, [audioUrl]);
 
   useEffect(() => {
+    if (audioPlayer.readyState === HTMLMediaElement.HAVE_ENOUGH_DATA) {
+      setIsReady(true);
+    }
+
+    const handleCanPlay = () => setIsReady(true);
+    audioPlayer.addEventListener('canplaythrough', handleCanPlay);
+
     return () => {
-      unload();
+      audioPlayer.removeEventListener('canplaythrough', handleCanPlay);
     };
-  }, []);
+  }, [audioUrl]);
 
   function play() {
     if (audioPlayer.readyState === HTMLMediaElement.HAVE_ENOUGH_DATA) {
@@ -74,14 +87,6 @@ const useAudioPlayer = (
 
   function setVolume(newVolume: number) {
     audioPlayer.volume = newVolume;
-  }
-
-  function unload() {
-    stop();
-    audioPlayer.src = '';
-    setIsPlaying(false);
-    setIsReady(false);
-    setOnThemePage(false);
   }
 
   return {

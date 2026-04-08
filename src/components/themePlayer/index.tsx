@@ -5,11 +5,13 @@ import useThemeMusic from '../../hooks/useThemeMusic';
 import { useSettings } from '../../hooks/useSettings';
 import { getCache } from '../../cache/musicCache';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
+import { useAudioLoaderCompatState } from '../../state/AudioLoaderCompatState';
 
 export default function ThemePlayer({
   appid: propAppId
 }: { appid?: number } = {}): ReactElement {
   const { settings, isLoading: settingsIsLoading } = useSettings();
+  const { gamesRunning } = useAudioLoaderCompatState();
   const { appid: paramAppId } = useParams<{ appid: string }>();
   const appid =
     propAppId !== undefined ? propAppId : parseInt(paramAppId ?? '0');
@@ -36,10 +38,17 @@ export default function ThemePlayer({
   }, [settingsIsLoading]);
 
   useEffect(() => {
-    if (audio?.audioUrl?.length && audioPlayer.isReady) {
+    if (
+      audio?.audioUrl?.length &&
+      audioPlayer.isReady &&
+      gamesRunning.length === 0
+    ) {
       audioPlayer.play();
     }
-  }, [audio?.audioUrl, audioPlayer.isReady]);
+    if (gamesRunning.length > 0) {
+      audioPlayer.pause();
+    }
+  }, [audio?.audioUrl, audioPlayer.isReady, gamesRunning]);
 
   return <></>;
 }

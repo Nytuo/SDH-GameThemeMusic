@@ -33,6 +33,11 @@ class Plugin:
     cache_path = str(Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "cache")
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     is_windows = platform.system() == "Windows"
+    
+    subprocess_flags = {}
+    if is_windows:
+        import subprocess as sp
+        subprocess_flags = {"creationflags": sp.CREATE_NO_WINDOW}
 
     async def _main(self):
         logger.info(f"Plugin initializing on {platform.system()} ({platform.machine()})")
@@ -111,6 +116,7 @@ class Plugin:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._get_env(),
+                **self.subprocess_flags,
             )
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
             if process.returncode == 0 and stdout:
@@ -301,6 +307,7 @@ class Plugin:
                 stderr=asyncio.subprocess.PIPE,
                 limit=10 * 1024 ** 2,
                 env=self._get_env(),
+                **self.subprocess_flags,
             )
             logger.info(f"yt-dlp search started for: {term}")
         except Exception as e:
@@ -387,6 +394,7 @@ class Plugin:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._get_env(),
+                **self.subprocess_flags,
             )
             if (
                     result.stdout is None
@@ -433,6 +441,7 @@ class Plugin:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._get_env(),
+                **self.subprocess_flags,
             )
             stdout, stderr = await process.communicate()
 
