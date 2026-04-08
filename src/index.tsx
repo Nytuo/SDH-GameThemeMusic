@@ -19,11 +19,8 @@ export default definePlugin(() => {
   const state: AudioLoaderCompatState = new AudioLoaderCompatState();
   const libraryPatch = patchLibraryApp(state);
 
-  const focusedState: AudioLoaderCompatState = new AudioLoaderCompatState();
   const GlobalPlayer = () => (
-    <AudioLoaderCompatStateContextProvider
-      AudioLoaderCompatStateClass={focusedState}
-    >
+    <AudioLoaderCompatStateContextProvider AudioLoaderCompatStateClass={state}>
       <FocusedGameThemePlayer />
     </AudioLoaderCompatStateContextProvider>
   );
