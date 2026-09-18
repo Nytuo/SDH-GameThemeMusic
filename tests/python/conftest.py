@@ -61,6 +61,10 @@ def plugin(tmp_path, monkeypatch):
     Path(p.cache_path).mkdir()
     p.settings = FakeSettingsManager("config")
     p.yt_process = None
+    # Deterministic, host independent behaviour; Windows paths are tested
+    # explicitly.
+    p.is_windows = False
+    p.subprocess_flags = {}
     return p
 
 

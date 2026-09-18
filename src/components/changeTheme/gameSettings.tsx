@@ -8,62 +8,48 @@ import {
 import { useEffect, useState } from 'react';
 import { getCache, updateCache } from '../../cache/musicCache';
 
-import { getResolverForVideoId } from '../../actions/audio';
 import useTranslations from '../../hooks/useTranslations';
 import { useSettings } from '../../hooks/useSettings';
 import { FaVolumeUp } from 'react-icons/fa';
 import Spinner from '../spinner';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
+import useThemeMusic, { getAppName } from '../../hooks/useThemeMusic';
 
 export default function GameSettings() {
   const t = useTranslations();
   const { settings, isLoading: settingsIsLoading } = useSettings();
   const { appid } = useParams<{ appid: string }>();
-  const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid));
-  const appName = appDetails?.display_name;
+  const appId = parseInt(appid);
+  const appName = getAppName(appId);
 
-  const [currentAudio, setCurrentAudio] = useState<string>();
+  const { audio, isLoading: loading } = useThemeMusic(appId);
   const [themeVolume, setThemeVolume] = useState(settings.volume);
-  const [loading, setLoading] = useState(true);
 
-  const audioPlayer = useAudioPlayer(currentAudio);
+  const audioPlayer = useAudioPlayer(audio.audioUrl, 'preview');
 
   useEffect(() => {
-    async function getData() {
-      setLoading(true);
-      const cache = await getCache(parseInt(appid));
-      if (typeof cache?.volume === 'number' && isFinite(cache.volume)) {
-        setThemeVolume(cache.volume);
-      } else {
-        setThemeVolume(settings.volume);
-      }
-      if (cache?.videoId?.length) {
-        const resolver = getResolverForVideoId(cache.videoId);
-        const newAudio = await resolver.getAudioUrlFromVideo({
-          id: cache?.videoId
-        });
-        setCurrentAudio(newAudio);
-      } else {
-        const resolver = getResolverForVideoId('');
-        const newAudio = await resolver.getAudio(appName as string);
-        setCurrentAudio(newAudio?.audioUrl);
-      }
-      setLoading(false);
-    }
+    let ignore = false;
     if (!settingsIsLoading) {
-      getData().then(() => {
-        return;
+      getCache(appId).then((cache) => {
+        if (ignore) return;
+        const volume =
+          typeof cache?.volume === 'number' && isFinite(cache.volume)
+            ? cache.volume
+            : settings.volume;
+        setThemeVolume(volume);
+        audioPlayer.setVolume(volume);
       });
     }
-  }, [appid, settingsIsLoading]);
+    return () => {
+      ignore = true;
+    };
+  }, [appId, settingsIsLoading]);
 
   function updateThemeVolume(newVol: number, reset?: boolean) {
     setThemeVolume(newVol);
     audioPlayer.setVolume(newVol);
-    updateCache(parseInt(appid), { volume: reset ? undefined : newVol }).then(
-      () => {
-        return;
-      }
+    updateCache(appId, { volume: reset ? undefined : newVol }).catch(
+      console.error
     );
   }
 
@@ -102,8 +88,8 @@ export default function GameSettings() {
         </div>
         <DialogButton
           onClick={audioPlayer.togglePlay}
-          disabled={loading}
-          focusable={!loading}
+          disabled={loading || !audio.audioUrl}
+          focusable={!loading && !!audio.audioUrl}
           style={{ height: 'max-content' }}
         >
           {loading ? (

@@ -21,7 +21,8 @@ vi.mock('@decky/ui', () => ({
   appDetailsClasses: {
     InnerContainer: 'InnerContainer'
   },
-  createReactTreePatcher: vi.fn()
+  createReactTreePatcher: vi.fn(),
+  Router: {}
 }));
 
 vi.mock('@decky/api', () => ({

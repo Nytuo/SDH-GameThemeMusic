@@ -7,48 +7,60 @@ import { getCache } from '../../cache/musicCache';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
 import { useAudioLoaderCompatState } from '../../state/AudioLoaderCompatState';
 
-export default function ThemePlayer({
-  appid: propAppId
-}: { appid?: number } = {}): ReactElement {
+function AppThemePlayer({ appid }: { appid: number }): ReactElement {
   const { settings, isLoading: settingsIsLoading } = useSettings();
-  const { gamesRunning } = useAudioLoaderCompatState();
-  const { appid: paramAppId } = useParams<{ appid: string }>();
-  const appid =
-    propAppId !== undefined ? propAppId : parseInt(paramAppId ?? '0');
-
-  const isDetailPage = propAppId === undefined;
-  const shouldPlay = !isDetailPage || !settings.homepageFocusMode;
-  const { audio } = useThemeMusic(shouldPlay ? appid : 0);
+  const { gamesRunning, suspended } = useAudioLoaderCompatState();
+  const { audio, isLoading } = useThemeMusic(appid);
   const audioPlayer = useAudioPlayer(audio.audioUrl);
 
   useEffect(() => {
-    async function getData() {
-      const cache = await getCache(appid);
-      if (typeof cache?.volume === 'number' && isFinite(cache.volume)) {
-        audioPlayer.setVolume(cache.volume);
-      } else {
-        audioPlayer.setVolume(settings.volume);
-      }
-    }
+    let ignore = false;
     if (!settingsIsLoading) {
-      getData().then(() => {
-        return;
+      getCache(appid).then((cache) => {
+        if (ignore) return;
+        audioPlayer.setVolume(
+          typeof cache?.volume === 'number' && isFinite(cache.volume)
+            ? cache.volume
+            : settings.volume
+        );
       });
     }
-  }, [settingsIsLoading]);
+    return () => {
+      ignore = true;
+    };
+  }, [appid, settingsIsLoading, settings.volume]);
+
+  const canPlay = gamesRunning.length === 0 && !suspended;
 
   useEffect(() => {
-    if (
-      audio?.audioUrl?.length &&
-      audioPlayer.isReady &&
-      gamesRunning.length === 0
-    ) {
+    if (isLoading) return;
+    if (!audio.audioUrl?.length) {
+      // "No music" (or nothing found): silence whatever was playing before.
+      audioPlayer.stop();
+    } else if (canPlay) {
       audioPlayer.play();
-    }
-    if (gamesRunning.length > 0) {
+    } else {
       audioPlayer.pause();
     }
-  }, [audio?.audioUrl, audioPlayer.isReady, gamesRunning]);
+  }, [audio.audioUrl, isLoading, canPlay]);
 
   return <></>;
+}
+
+/**
+ * Game detail page player (no `appid` prop, read from the route) or
+ * homepage focus player (`appid` prop).
+ */
+export default function ThemePlayer({
+  appid: propAppId
+}: { appid?: number } = {}): ReactElement {
+  const { settings, isLoading } = useSettings();
+  const { appid: paramAppId } = useParams<{ appid: string }>();
+  const isDetailPage = propAppId === undefined;
+  const appid = isDetailPage ? parseInt(paramAppId ?? '0') : propAppId;
+
+  if (isLoading || !appid || !Number.isFinite(appid)) return <></>;
+  // In homepage mode the detail page stays silent.
+  if (isDetailPage && settings.homepageFocusMode) return <></>;
+  return <AppThemePlayer key={appid} appid={appid} />;
 }

@@ -3,68 +3,46 @@ import { act, renderHook } from '@testing-library/react';
 import { FakeAudio, installFakeAudio } from './fakeAudio';
 
 const compat = {
-  setOnThemePage: vi.fn(),
-  registerAudioPlayer: vi.fn(),
-  unregisterAudioPlayer: vi.fn()
+  setOnThemePage: vi.fn()
 };
 
 vi.mock('../../src/state/AudioLoaderCompatState', () => ({
   useAudioLoaderCompatState: () => compat
 }));
 
-import GlobalAudioPlayer from '../../src/lib/globalAudioPlayer';
 import useAudioPlayer from '../../src/hooks/useAudioPlayer';
+import {
+  destroyAudioChannels,
+  getAudioChannel
+} from '../../src/lib/audioChannel';
 
-let audio: ReturnType<typeof installFakeAudio>;
+const element = (name: 'theme' | 'preview' = 'theme') =>
+  getAudioChannel(name).element as unknown as FakeAudio;
 
 beforeEach(() => {
-  audio = installFakeAudio();
-  (GlobalAudioPlayer as any).instance = null;
-  Object.values(compat).forEach((fn) => fn.mockClear());
+  installFakeAudio();
+  destroyAudioChannels();
+  compat.setOnThemePage.mockClear();
 });
 
-function element(): FakeAudio {
-  return GlobalAudioPlayer.getInstance().getAudioElement() as unknown as FakeAudio;
-}
-
-describe('GlobalAudioPlayer', () => {
-  it('is a looping singleton', () => {
-    const a = GlobalAudioPlayer.getInstance();
-    const b = GlobalAudioPlayer.getInstance();
-    expect(a).toBe(b);
-    expect(audio.ctor).toHaveBeenCalledTimes(1);
-    expect(a.getAudioElement().loop).toBe(true);
-    expect(a.getAudioElement().preload).toBe('auto');
-  });
-});
-
-describe('useAudioPlayer', () => {
-  it('registers with the compat state and unregisters on unmount', () => {
+describe('useAudioPlayer (theme)', () => {
+  it('claims and releases the theme page', () => {
     const { unmount } = renderHook(() => useAudioPlayer(undefined));
-    expect(compat.registerAudioPlayer).toHaveBeenCalledTimes(1);
+    expect(compat.setOnThemePage).toHaveBeenLastCalledWith(true);
     unmount();
-    expect(compat.unregisterAudioPlayer).toHaveBeenCalledTimes(1);
+    expect(compat.setOnThemePage).toHaveBeenLastCalledWith(false);
   });
 
-  it('loads the url and becomes ready on canplaythrough', () => {
+  it('preloads the url and reports readiness', () => {
     const { result } = renderHook(() => useAudioPlayer('https://a'));
     expect(element().src).toBe('https://a');
     expect(result.current.isReady).toBe(false);
-
     act(() => element().becomeReady());
     expect(result.current.isReady).toBe(true);
   });
 
-  it('does not play before the audio is ready', () => {
-    const { result } = renderHook(() => useAudioPlayer('https://a'));
-    act(() => result.current.play());
-    expect(element().play).not.toHaveBeenCalled();
-    expect(result.current.isPlaying).toBe(false);
-  });
-
   it('play / stop / togglePlay', () => {
     const { result } = renderHook(() => useAudioPlayer('https://a'));
-    act(() => element().becomeReady());
 
     act(() => result.current.play());
     expect(element().play).toHaveBeenCalled();
@@ -72,24 +50,12 @@ describe('useAudioPlayer', () => {
 
     element().currentTime = 12;
     act(() => result.current.stop());
-    expect(element().pause).toHaveBeenCalled();
+    expect(element().paused).toBe(true);
     expect(element().currentTime).toBe(0);
     expect(result.current.isPlaying).toBe(false);
 
     act(() => result.current.togglePlay());
     expect(result.current.isPlaying).toBe(true);
-  });
-
-  it('pause only pauses a playing element', () => {
-    const { result } = renderHook(() => useAudioPlayer('https://a'));
-    act(() => result.current.pause());
-    expect(element().pause).not.toHaveBeenCalled();
-  });
-
-  it('setVolume writes through to the element', () => {
-    const { result } = renderHook(() => useAudioPlayer('https://a'));
-    act(() => result.current.setVolume(0.3));
-    expect(element().volume).toBe(0.3);
   });
 
   it('switches source when the url changes', () => {
@@ -98,5 +64,64 @@ describe('useAudioPlayer', () => {
     });
     rerender({ url: 'https://b' });
     expect(element().src).toBe('https://b');
+  });
+
+  it('the newest theme player takes control', () => {
+    const first = renderHook(() => useAudioPlayer('https://a'));
+    act(() => first.result.current.play());
+    const second = renderHook(() => useAudioPlayer(undefined));
+    // "No music" for the newly focused game silences the previous one.
+    act(() => second.result.current.stop());
+    expect(element().paused).toBe(true);
+  });
+
+  it('setVolume writes through to the element', () => {
+    const { result } = renderHook(() => useAudioPlayer('https://a'));
+    act(() => result.current.setVolume(0.3));
+    expect(element().volume).toBe(0.3);
+  });
+});
+
+describe('useAudioPlayer (preview)', () => {
+  it('does not load anything until play', () => {
+    renderHook(() => useAudioPlayer('https://a', 'preview'));
+    expect(element('preview').src).toBe('');
+  });
+
+  it('each card plays its own track (regression: previews played the downloaded song)', () => {
+    // The theme channel holds the already-downloaded song.
+    const theme = renderHook(() =>
+      useAudioPlayer('data:audio/mpeg;base64,OLD')
+    );
+    act(() => theme.result.current.play());
+
+    const a = renderHook(() => useAudioPlayer('https://a', 'preview'));
+    const b = renderHook(() => useAudioPlayer('https://b', 'preview'));
+
+    act(() => b.result.current.play());
+    expect(element('preview').src).toBe('https://b');
+    expect(element('theme').paused).toBe(true);
+    expect(b.result.current.isPlaying).toBe(true);
+
+    act(() => a.result.current.play());
+    expect(element('preview').src).toBe('https://a');
+    expect(a.result.current.isPlaying).toBe(true);
+    expect(b.result.current.isPlaying).toBe(false);
+  });
+
+  it('play(url) plays a freshly resolved url', () => {
+    const { result } = renderHook(() => useAudioPlayer(undefined, 'preview'));
+    act(() => result.current.play('https://resolved'));
+    expect(element('preview').src).toBe('https://resolved');
+  });
+
+  it('stops when the playing card unmounts (leaving the page)', () => {
+    const { result, unmount } = renderHook(() =>
+      useAudioPlayer('https://a', 'preview')
+    );
+    act(() => result.current.play());
+    unmount();
+    expect(element('preview').paused).toBe(true);
+    expect(element('preview').src).toBe('');
   });
 });

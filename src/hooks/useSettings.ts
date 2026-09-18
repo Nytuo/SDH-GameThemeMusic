@@ -28,11 +28,22 @@ function loadSettings() {
     'get_setting',
     'settings',
     defaultSettings
-  ).then((saved) => {
-    _settings = saved;
-    _loaded = true;
-    notifyAll();
-  });
+  )
+    .then((saved) => {
+      // Keys added in newer versions fall back to their defaults.
+      _settings = {
+        ...defaultSettings,
+        ...(saved && typeof saved === 'object' ? saved : {})
+      };
+    })
+    .catch((e) => {
+      console.error('[GameThemeMusic] Could not load settings', e);
+      _settings = { ...defaultSettings };
+    })
+    .finally(() => {
+      _loaded = true;
+      notifyAll();
+    });
   return _loadPromise;
 }
 

@@ -156,7 +156,7 @@ describe('Local resolver', () => {
 });
 
 describe('AudioResolver.getAudio', () => {
-  it('returns the first playable result and downloads it', async () => {
+  it('returns the first playable result without downloading it', async () => {
     const results = [
       { id: 'bad', title: 'bad', thumbnail: '', url: '' },
       { id: 'good', title: 'good', thumbnail: '', url: '' }
@@ -177,7 +177,33 @@ describe('AudioResolver.getAudio', () => {
 
     const res = await getResolver('ytdlp').getAudio('Zelda');
     expect(res).toEqual({ videoId: 'good', audioUrl: 'https://good' });
-    expect(mockCall).toHaveBeenCalledWith('download_yt_audio', 'good');
+    expect(mockCall).not.toHaveBeenCalledWith('download_yt_audio', 'good');
+  });
+
+  it('stops when cancelled', async () => {
+    mockCall.mockImplementation(async (method: string) =>
+      method === 'next_yt_result'
+        ? { id: 'a', title: 'a', thumbnail: '' }
+        : method === 'single_yt_url'
+          ? 'https://a'
+          : undefined
+    );
+    expect(
+      await getResolver('ytdlp').getAudio('Zelda', () => true)
+    ).toBeUndefined();
+    expect(mockCall).not.toHaveBeenCalledWith('single_yt_url', 'a');
+  });
+
+  it('gives up after a few unplayable results', async () => {
+    mockCall.mockImplementation(async (method: string) =>
+      method === 'next_yt_result'
+        ? { id: 'x', title: 'x', thumbnail: '' }
+        : null
+    );
+    expect(await getResolver('ytdlp').getAudio('Zelda')).toBeUndefined();
+    expect(
+      mockCall.mock.calls.filter((c) => c[0] === 'single_yt_url').length
+    ).toBe(5);
   });
 
   it('returns undefined when nothing is playable', async () => {

@@ -1,4 +1,4 @@
-import { staticClasses } from '@decky/ui';
+import { Router, staticClasses } from '@decky/ui';
 import { definePlugin, routerHook } from '@decky/api';
 
 import { GiMusicalNotes } from 'react-icons/gi';
@@ -12,11 +12,27 @@ import {
   AudioLoaderCompatState,
   AudioLoaderCompatStateContextProvider
 } from './state/AudioLoaderCompatState';
+import { destroyAudioChannels } from './lib/audioChannel';
+import { startPlaybackGuard } from './lib/playbackGuard';
 
 import { name } from '@decky/manifest';
 
 export default definePlugin(() => {
   const state: AudioLoaderCompatState = new AudioLoaderCompatState();
+
+  // Games already running when the plugin (re)loads.
+  try {
+    const running = (Router?.RunningApps ?? [])
+      .map((app) => Number(app.appid))
+      .filter((appid) => Number.isFinite(appid) && appid > 0);
+    if (running.length) state.setGamesRunning(running);
+  } catch {
+    /* Router not ready */
+  }
+
+  const stopPlaybackGuard = startPlaybackGuard((suspended) =>
+    state.setSuspended(suspended)
+  );
   const libraryPatch = patchLibraryApp(state);
 
   const GlobalPlayer = () => (
@@ -72,11 +88,13 @@ export default definePlugin(() => {
     icon: <GiMusicalNotes />,
     content: <Settings />,
     onDismount() {
+      stopPlaybackGuard();
       AppStateRegistrar.unregister();
       routerHook.removePatch('/library/app/:appid', libraryPatch);
       routerHook.removeRoute('/gamethememusic/:appid');
       routerHook.removeGlobalComponent('GTMFocusedPlayer');
       patchedMenu?.unpatch();
+      destroyAudioChannels();
     }
   };
 });

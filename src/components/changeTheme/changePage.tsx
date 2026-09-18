@@ -24,13 +24,11 @@ export default function ChangePage({
   customSearch,
   currentSearch,
   setInitialSearch,
-  handlePlay,
   loading,
   videos
 }: {
-  videos: (MediaContentPreview & { isPlaying: boolean })[];
+  videos: MediaContentPreview[];
   loading: boolean;
-  handlePlay: (idx: number, startPlaying: boolean) => void;
   customSearch: (term: string) => void;
   setInitialSearch: () => string;
   currentSearch: string;
@@ -140,14 +138,11 @@ export default function ChangePage({
               selected={selected === ''}
               selectNewAudio={selectNewAudio}
             />
-            {videos.map((video, index) => (
+            {videos.map((video) => (
               <AudioPlayer
                 key={video.id}
                 video={video}
                 volume={settings.volume}
-                handlePlay={(status) => {
-                  handlePlay(index, status);
-                }}
                 selected={selected === video.id}
                 selectNewAudio={selectNewAudio}
               />

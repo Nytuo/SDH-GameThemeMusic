@@ -1,4 +1,5 @@
 """Backend tests for main.Plugin."""
+import asyncio
 import base64
 import json
 import sys
@@ -45,6 +46,15 @@ class TestLifecycle:
         plugin.yt_process = proc
         await plugin._unload()
         assert proc.terminated
+
+    async def test_windows_kills_whole_process_tree(self, plugin, fake_exec):
+        plugin.is_windows = True
+        proc = FakeProcess()
+        proc.pid = 4242
+        await plugin._stop_process(proc)
+        assert fake_exec.calls[0]["args"] == [
+            "taskkill", "/T", "/F", "/PID", "4242"
+        ]
 
     async def test_settings_roundtrip(self, plugin):
         assert await plugin.get_setting("settings", {"volume": 1}) == {"volume": 1}
@@ -169,16 +179,20 @@ class TestYtDlpBinary:
                 ],
             }
 
-        async def dl(url):
-            downloaded.append(url)
+        async def dl(url, expected=None):
+            downloaded.append((url, expected))
             return True
 
+        async def sums(assets, name):
+            return "abc123"
+
+        monkeypatch.setattr(plugin, "_fetch_expected_sha256", sums)
         monkeypatch.setattr(plugin, "get_ytdlp_version", ver)
         monkeypatch.setattr(plugin, "get_latest_ytdlp_release", rel)
         monkeypatch.setattr(plugin, "_get_ytdlp_asset_name", lambda: "wanted")
         monkeypatch.setattr(plugin, "download_ytdlp_binary", dl)
         assert await plugin.check_and_update_ytdlp() is True
-        assert downloaded == ["https://x/wanted"]
+        assert downloaded == [("https://x/wanted", "abc123")]
 
     async def test_update_missing_asset(self, plugin, monkeypatch):
         async def ver():
@@ -197,11 +211,15 @@ class TestYtDlpBinary:
 # --------------------------------------------------------------------------- #
 
 
+def yt_id(i):
+    return f"video{i:06d}"  # 11 characters, like a real YouTube id
+
+
 def yt_entry(i):
     return {
         "url": f"https://audio/{i}",
         "title": f"Song {i}",
-        "id": f"vid{i}",
+        "id": yt_id(i),
         "thumbnail": f"https://thumb/{i}",
         "extra": "ignored",
     }
@@ -212,7 +230,7 @@ class TestYouTube:
         assert main.Plugin.entry_to_info(yt_entry(1)) == {
             "url": "https://audio/1",
             "title": "Song 1",
-            "id": "vid1",
+            "id": yt_id(1),
             "thumbnail": "https://thumb/1",
         }
 
@@ -233,7 +251,8 @@ class TestYouTube:
         results = []
         while (r := await plugin.next_yt_result()) is not None:
             results.append(r)
-        assert [r["id"] for r in results] == ["vid0", "vid1", "vid2"]
+        assert [r["id"] for r in results] == [yt_id(0), yt_id(1), yt_id(2)]
+        assert "--flat-playlist" in args
 
     async def test_new_search_terminates_previous(self, plugin, fake_exec):
         write(Path(plugin._get_ytdlp_path()))
@@ -244,38 +263,111 @@ class TestYouTube:
         await plugin.search_yt("b")
         assert first.terminated
 
-    async def test_next_result_ignores_bad_json(self, plugin, fake_exec):
+    async def test_next_result_skips_bad_json(self, plugin, fake_exec):
         write(Path(plugin._get_ytdlp_path()))
-        fake_exec.next = FakeProcess(stdout=b"not json\n")
+        fake_exec.next = FakeProcess(
+            stdout=b"not json\n" + json.dumps(yt_entry(4)).encode() + b"\n"
+        )
         await plugin.search_yt("x")
+        assert (await plugin.next_yt_result())["id"] == yt_id(4)
         assert await plugin.next_yt_result() is None
 
     async def test_single_url_prefers_local_file(self, plugin, fake_exec):
-        write(Path(plugin.music_path) / "abc.webm", b"hello")
-        url = await plugin.single_yt_url("abc")
+        write(Path(plugin.music_path) / f"{yt_id(1)}.webm", b"hello")
+        url = await plugin.single_yt_url(yt_id(1))
         assert url.startswith("data:audio/")
         assert base64.b64decode(url.split(",", 1)[1]) == b"hello"
         assert fake_exec.calls == []
 
     async def test_single_url_from_ytdlp(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
         fake_exec.next = FakeProcess(stdout=json.dumps(yt_entry(7)).encode())
-        assert await plugin.single_yt_url("vid7") == "https://audio/7"
+        assert await plugin.single_yt_url(yt_id(7)) == "https://audio/7"
+        args = fake_exec.calls[0]["args"]
+        # the id comes after "--" so it can never be parsed as an option
+        assert args[args.index("--") + 1] == yt_id(7)
 
     async def test_single_url_no_output(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
         fake_exec.next = FakeProcess(stdout=b"")
-        assert await plugin.single_yt_url("vid7") is None
+        assert await plugin.single_yt_url(yt_id(7)) is None
+
+    @pytest.mark.parametrize(
+        "bad", ["--exec=touch pwned", "../../etc/passwd", "abc", "https://evil.com/x"]
+    )
+    async def test_single_url_rejects_invalid_ids(self, plugin, fake_exec, bad):
+        write(Path(plugin._get_ytdlp_path()))
+        assert await plugin.single_yt_url(bad) is None
+        assert fake_exec.calls == []
+
+    async def test_single_url_accepts_youtube_urls(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        fake_exec.next = FakeProcess(stdout=json.dumps(yt_entry(1)).encode())
+        url = "https://www.youtube.com/watch?v=" + yt_id(1)
+        assert await plugin.single_yt_url(url) == "https://audio/1"
 
     async def test_download_skips_existing(self, plugin, fake_exec):
-        write(Path(plugin.music_path) / "abc.webm")
-        await plugin.download_yt_audio("abc")
+        write(Path(plugin.music_path) / f"{yt_id(1)}.webm")
+        await plugin.download_yt_audio(yt_id(1))
         assert fake_exec.calls == []
 
     async def test_download_invokes_ytdlp(self, plugin, fake_exec):
-        fake_exec.next = FakeProcess(returncode=0)
-        await plugin.download_yt_audio("abc")
+        write(Path(plugin._get_ytdlp_path()))
+
+        def run(args):
+            write(Path(plugin.music_path) / f"{yt_id(1)}.m4a")
+            return FakeProcess(returncode=0)
+
+        fake_exec.next = run
+        await plugin.download_yt_audio(yt_id(1))
         args = fake_exec.calls[0]["args"]
-        assert "abc" in args
+        assert args[args.index("--") + 1] == yt_id(1)
         assert plugin.music_path in args
+
+    async def test_download_failure_raises_and_cleans_up(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+
+        def run(args):
+            write(Path(plugin.music_path) / f"{yt_id(1)}.webm.part")
+            return FakeProcess(returncode=1, stderr=b"HTTP Error 403")
+
+        fake_exec.next = run
+        with pytest.raises(RuntimeError, match="403"):
+            await plugin.download_yt_audio(yt_id(1))
+        assert list(Path(plugin.music_path).iterdir()) == []
+
+    async def test_download_rejects_invalid_id(self, plugin, fake_exec):
+        with pytest.raises(ValueError):
+            await plugin.download_yt_audio("-o/tmp/x")
+        assert fake_exec.calls == []
+
+    async def test_resolve_timeout_kills_process(self, plugin, fake_exec, monkeypatch):
+        write(Path(plugin._get_ytdlp_path()))
+        proc = FakeProcess()
+
+        async def hang():
+            await asyncio.sleep(10)
+
+        proc.communicate = hang
+        fake_exec.next = proc
+        monkeypatch.setattr(main, "YT_RESOLVE_TIMEOUT", 0.05)
+        assert await plugin.single_yt_url(yt_id(1)) is None
+        assert proc.terminated or proc.killed
+
+    def test_entry_to_info_flat_search_thumbnail(self):
+        info = main.Plugin.entry_to_info({
+            "id": yt_id(3),
+            "url": "https://www.youtube.com/watch?v=" + yt_id(3),
+            "title": "x",
+        })
+        assert info["thumbnail"] == f"https://i.ytimg.com/vi/{yt_id(3)}/hqdefault.jpg"
+
+    def test_entry_to_info_prefers_largest_thumbnail(self):
+        info = main.Plugin.entry_to_info({
+            "id": yt_id(3),
+            "thumbnails": [{"url": "small"}, {"url": "large"}],
+        })
+        assert info["thumbnail"] == "large"
 
 
 # --------------------------------------------------------------------------- #
@@ -330,15 +422,22 @@ class TestDirectDownloads:
         fake_http.routes["https://itunes.apple.com/lookup"] = FakeResponse(
             json_data={"results": []}
         )
-        await plugin.download_itunes("42")
+        with pytest.raises(RuntimeError):
+            await plugin.download_itunes("42")
         assert list(Path(plugin.music_path).iterdir()) == []
+
+    async def test_download_itunes_rejects_bad_id(self, plugin, fake_http):
+        with pytest.raises(ValueError):
+            await plugin.download_itunes("itunes_../../x")
+        assert fake_http.calls == []
 
     async def test_download_itunes_preview_failure_cleans_up(self, plugin, fake_http):
         fake_http.routes["https://itunes.apple.com/lookup"] = FakeResponse(
             json_data={"results": [{"previewUrl": "https://audio.itunes/p.m4a"}]}
         )
         fake_http.routes["https://audio.itunes/"] = FakeResponse(status=500)
-        await plugin.download_itunes("42")
+        with pytest.raises(Exception):
+            await plugin.download_itunes("42")
         assert list(Path(plugin.music_path).iterdir()) == []
 
     async def test_search_itunes_maps_results(self, plugin, fake_http):

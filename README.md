@@ -121,6 +121,10 @@ Can use locally stored music files.
 
 Contributions are welcome! Open an issue or pull request on GitHub to contribute !
 
+## Disclaimer
+
+This fork is maintained with the assistance of AI (Claude). While AI helps with implementation, bug fixes, and maintenance, all changes are reviewed and merged by human maintainers. If you encounter any issues or have concerns about AI-assisted development, please open an issue on GitHub.
+
 ## Authors & Credits
 
 - Original: [OMGDuke](https://github.com/OMGDuke)

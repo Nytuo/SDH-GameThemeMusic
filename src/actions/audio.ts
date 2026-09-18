@@ -19,16 +19,20 @@ abstract class AudioResolver {
     }
   }
 
+  /**
+   * First playable search result for a game. Does not download it; callers
+   * decide whether to (e.g. in the background).
+   */
   async getAudio(
-    appName: string
+    appName: string,
+    isCancelled: () => boolean = () => false
   ): Promise<{ videoId: string; audioUrl: string } | undefined> {
     const videos = this.getSearchResults(appName + ' Theme Music');
+    let tried = 0;
     for await (const video of videos) {
+      if (isCancelled() || tried++ >= 5) return undefined;
       const audioUrl = await this.getAudioUrlFromVideo(video);
       if (audioUrl?.length) {
-        if (!video.id.startsWith('local_')) {
-          await this.downloadAudio(video);
-        }
         return { audioUrl, videoId: video.id };
       }
     }

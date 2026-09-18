@@ -51,3 +51,27 @@ describe('useSettings', () => {
     );
   });
 });
+
+describe('useSettings resilience', () => {
+  it('falls back to defaults when loading fails', async () => {
+    mockCall.mockRejectedValue(new Error('backend down'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { useSettings, defaultSettings } = await load();
+    const { result } = renderHook(() => useSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.settings).toEqual(defaultSettings);
+    spy.mockRestore();
+  });
+
+  it('fills in settings missing from older saves', async () => {
+    mockCall.mockResolvedValue({ volume: 0.4 });
+    const { useSettings } = await load();
+    const { result } = renderHook(() => useSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.settings).toEqual({
+      defaultMuted: false,
+      volume: 0.4,
+      homepageFocusMode: false
+    });
+  });
+});

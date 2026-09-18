@@ -4,74 +4,69 @@ import { useEffect, useState } from 'react';
 import useTranslations from '../../hooks/useTranslations';
 import ChangePage from './changePage';
 import AboutPage from './aboutPage';
-import { getResolver, SEARCH_PROVIDERS } from '../../actions/audio';
+import {
+  AudioProvider,
+  getResolver,
+  SEARCH_PROVIDERS
+} from '../../actions/audio';
+import { getAppName } from '../../hooks/useThemeMusic';
 import { MediaContentPreview } from '../../../types/media';
 import GameSettings from './gameSettings';
 import { useSettings } from '../../hooks/useSettings';
+
+type ProviderResults = Partial<Record<AudioProvider, MediaContentPreview[]>>;
 
 export default function ChangeTheme() {
   const [currentTab, setCurrentTab] = useState<string>('change-music-tab');
   const t = useTranslations();
   const { isLoading: settingsLoading } = useSettings();
   const { appid } = useParams<{ appid: string }>();
-  const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid));
-  const appName = appDetails?.display_name?.replace(/([™®©])/g, '');
+  const appName = getAppName(parseInt(appid));
 
-  const [videos, setVideos] = useState<
-    (MediaContentPreview & { isPlaying: boolean })[]
-  >([]);
+  const [results, setResults] = useState<ProviderResults>({});
   const [loadingNum, setLoadingNum] = useState(0);
   const initialSearch = appName?.concat(' main theme') ?? '';
   const [searchTerm, setSearchTerm] = useState(initialSearch);
 
   useEffect(() => {
+    if (!searchTerm.length || settingsLoading) return;
     let ignore = false;
-    async function getData() {
+    setResults({});
+
+    // Each provider fills its own bucket in one update once it finishes, so
+    // fast providers don't wait for slow ones and the list doesn't re-render
+    // on every streamed item.
+    SEARCH_PROVIDERS.forEach(async (provider) => {
       setLoadingNum((x) => x + 1);
-      setVideos([]);
-
-      const providers = SEARCH_PROVIDERS;
-      const promises = providers.map(async (provider) => {
-        const resolver = getResolver(provider);
-        const results: (MediaContentPreview & { isPlaying: boolean })[] = [];
-        try {
-          for await (const video of resolver.getSearchResults(searchTerm)) {
-            if (ignore) break;
-            results.push({ isPlaying: false, ...video });
-          }
-        } catch (e) {
-          console.error(`Error searching ${provider}:`, e);
+      const seen = new Set<string>();
+      const found: MediaContentPreview[] = [];
+      try {
+        for await (const video of getResolver(provider).getSearchResults(
+          searchTerm
+        )) {
+          if (ignore) break;
+          if (!video?.id || seen.has(video.id)) continue;
+          seen.add(video.id);
+          found.push(video);
         }
-        return results;
-      });
-
-      const allResults = await Promise.all(promises);
-      const combined = allResults.flat();
-
-      if (!ignore) {
-        setVideos(combined);
+      } catch (e) {
+        console.error(`Error searching ${provider}:`, e);
+      } finally {
+        if (!ignore && found.length) {
+          setResults((old) => ({ ...old, [provider]: found }));
+        }
+        setLoadingNum((x) => x - 1);
       }
+    });
 
-      setLoadingNum((x) => x - 1);
-    }
-    if (searchTerm.length > 0 && !settingsLoading) {
-      getData().then(() => {
-        return;
-      });
-    }
     return () => {
       ignore = true;
     };
   }, [searchTerm, settingsLoading]);
 
-  function handlePlay(index: number, startPlay: boolean) {
-    setVideos((oldVideos) => {
-      return oldVideos.map((v, vIndex) => ({
-        ...v,
-        isPlaying: vIndex === index ? startPlay : false
-      }));
-    });
-  }
+  const videos = SEARCH_PROVIDERS.flatMap(
+    (provider) => results[provider] ?? []
+  );
 
   function setInitialSearch() {
     setSearchTerm(initialSearch);
@@ -96,7 +91,6 @@ export default function ChangeTheme() {
               <ChangePage
                 videos={videos}
                 loading={loadingNum > 0}
-                handlePlay={handlePlay}
                 customSearch={setSearchTerm}
                 currentSearch={searchTerm}
                 setInitialSearch={setInitialSearch}

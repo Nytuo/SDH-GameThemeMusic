@@ -1,6 +1,38 @@
+import { Router } from '@decky/ui';
 import { ReactElement, useEffect, useState } from 'react';
 import ThemePlayer from '../themePlayer';
 import { useSettings } from '../../hooks/useSettings';
+
+/** Wait this long on a tile before switching music (avoids thrashing). */
+const FOCUS_DWELL_MS = 500;
+const POLL_INTERVAL_MS = 400;
+
+/** Routes where the focus player must stay silent. */
+const BLOCKED_ROUTES = ['/gamethememusic/'];
+const DETAIL_ROUTE = /\/library\/app\/(\d+)/;
+
+export function getCurrentRoute(): string | null {
+  try {
+    const main = Router?.WindowStore?.GamepadUIMainWindowInstance as any;
+    const path =
+      main?.m_history?.location?.pathname ??
+      main?.BrowserWindow?.location?.pathname;
+    return typeof path === 'string' ? path : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isFocusPlaybackRoute(path: string | null): boolean {
+  if (path === null) return true;
+  return !BLOCKED_ROUTES.some((blocked) => path.includes(blocked));
+}
+
+export function getDetailRouteAppId(path: string | null): number | null {
+  const match = path?.match(DETAIL_ROUTE);
+  const appId = match ? Number(match[1]) : NaN;
+  return appId > 0 ? appId : null;
+}
 
 function isDomElement(obj: any): obj is HTMLElement {
   return (
@@ -80,12 +112,40 @@ function getElementFromNavNode(node: any): HTMLElement | null {
 }
 
 export default function FocusedGameThemePlayer(): ReactElement {
+  const { settings } = useSettings();
+  const enabled = settings.homepageFocusMode;
   const [focusedAppId, setFocusedAppId] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setFocusedAppId(null);
+      return;
+    }
+
     const w = window as any;
+    let dwellTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const commit = (appId: number | null) => {
+      if (dwellTimer !== null) clearTimeout(dwellTimer);
+      dwellTimer = null;
+      if (appId === null) {
+        setFocusedAppId(null);
+      } else {
+        dwellTimer = setTimeout(() => setFocusedAppId(appId), FOCUS_DWELL_MS);
+      }
+    };
     let lastAppId: number | null = null;
-    let diagLogged = false;
+
+    const update = (appId: number | null) => {
+      const route = getCurrentRoute();
+      // On a game's detail page keep playing that game, whatever is focused.
+      const next = isFocusPlaybackRoute(route)
+        ? (getDetailRouteAppId(route) ?? appId)
+        : null;
+      if (next === lastAppId) return;
+      lastAppId = next;
+      commit(next);
+    };
 
     const getFocusedNavNode = () => {
       try {
@@ -108,17 +168,7 @@ export default function FocusedGameThemePlayer(): ReactElement {
     const onFocusChanged = (_type: any, _from: any, to: any) => {
       if (!to) return;
       const el = getElementFromNavNode(to);
-      if (el && !diagLogged) {
-        diagLogged = true;
-      }
-      const id = el ? getAppIdFromElement(el) : null;
-      if (id !== null && id !== lastAppId) {
-        lastAppId = id;
-        setFocusedAppId(id);
-      } else if (id === null && lastAppId !== null) {
-        lastAppId = null;
-        setFocusedAppId(null);
-      }
+      update(el ? getAppIdFromElement(el) : null);
     };
 
     let unregister: (() => void) | null = null;
@@ -140,7 +190,7 @@ export default function FocusedGameThemePlayer(): ReactElement {
         /* ignore */
       }
     };
-    setTimeout(registerCallback, 2000);
+    const registerTimer = setTimeout(registerCallback, 2000);
 
     const tick = () => {
       let appId: number | null = null;
@@ -179,21 +229,18 @@ export default function FocusedGameThemePlayer(): ReactElement {
         }
       }
 
-      if (appId !== lastAppId) {
-        lastAppId = appId;
-        setFocusedAppId(appId);
-      }
+      update(appId);
     };
 
-    const interval = setInterval(tick, 400);
+    const interval = setInterval(tick, POLL_INTERVAL_MS);
     return () => {
       clearInterval(interval);
+      clearTimeout(registerTimer);
+      if (dwellTimer !== null) clearTimeout(dwellTimer);
       if (unregister) unregister();
     };
-  }, []);
+  }, [enabled]);
 
-  const { settings } = useSettings();
-
-  if (!focusedAppId || !settings.homepageFocusMode) return <></>;
+  if (!focusedAppId || !enabled) return <></>;
   return <ThemePlayer key={focusedAppId} appid={focusedAppId} />;
 }

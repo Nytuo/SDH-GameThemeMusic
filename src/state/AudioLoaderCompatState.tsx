@@ -1,45 +1,50 @@
 import { createContext, FC, useContext, useEffect, useState } from 'react';
+import { pauseAllAudio, setAllAudioSuspended } from '../lib/audioChannel';
 
 interface PublicAudioLoaderCompatState {
   gamesRunning: number[];
   onAppPage: boolean;
+  /** Playback is not allowed right now (Big Picture closed, sleeping...). */
+  suspended: boolean;
 }
 
 interface PublicAudioLoaderCompatStateContext extends PublicAudioLoaderCompatState {
   setGamesRunning(gamesRunning: number[]): void;
   setOnThemePage(onAppPage: boolean): void;
-  registerAudioPlayer(player: HTMLAudioElement): void;
-  unregisterAudioPlayer(player: HTMLAudioElement): void;
 }
 
 export class AudioLoaderCompatState {
   private delayMs = 1000;
   private gamesRunning: number[] = [];
   private onThemePage: boolean = false;
+  private themePageClaims = 0;
   private lastOnThemePageTime: number = 0;
-  private activeAudioPlayer: HTMLAudioElement | null = null;
+  private suspended = false;
 
   public eventBus = new EventTarget();
 
-  getPublicState() {
+  getPublicState(): PublicAudioLoaderCompatState {
     return {
       gamesRunning: this.gamesRunning,
-      onAppPage: this.onThemePage
+      onAppPage: this.onThemePage,
+      suspended: this.suspended
     };
   }
 
   setGamesRunning(gamesRunning: number[]) {
     const oldGamesRunning = this.gamesRunning;
-    const noGamesRunning = gamesRunning.length === 0;
-    const gameJustStarted = gamesRunning.length > oldGamesRunning.length;
+    const next = Array.from(new Set(gamesRunning));
+    const noGamesRunning = next.length === 0;
     const incrMs = 10;
 
-    this.gamesRunning = gamesRunning;
+    this.gamesRunning = next;
 
-    if (gameJustStarted && this.activeAudioPlayer) {
-      this.activeAudioPlayer.pause();
+    if (!noGamesRunning) {
+      pauseAllAudio();
     }
 
+    // AudioLoader resumes its menu music on its own once no game is running,
+    // force it off for a moment so we stay in control.
     if (noGamesRunning && oldGamesRunning.length > 0) {
       for (let i = 0; i < this.delayMs; i += incrMs) {
         setTimeout(() => {
@@ -55,14 +60,31 @@ export class AudioLoaderCompatState {
     );
   }
 
+  /**
+   * Every mounted player claims the theme page with `true` and releases it
+   * with `false`; AudioLoader menu music only comes back once all claims are
+   * released (after a short delay to cover page transitions).
+   */
   setOnThemePage(onAppPage: boolean) {
+    this.themePageClaims = Math.max(
+      0,
+      this.themePageClaims + (onAppPage ? 1 : -1)
+    );
+    const target = this.themePageClaims > 0;
     const time = Date.now();
     setTimeout(
       () => {
-        this.setOnThemePageInternal(onAppPage, time);
+        this.setOnThemePageInternal(target, time);
       },
-      onAppPage ? 0 : this.delayMs
+      target ? 0 : this.delayMs
     );
+  }
+
+  setSuspended(suspended: boolean) {
+    if (this.suspended === suspended) return;
+    this.suspended = suspended;
+    setAllAudioSuspended(suspended);
+    this.forceUpdate();
   }
 
   private setAudioLoaderEnabled(enabled: boolean) {
@@ -77,22 +99,13 @@ export class AudioLoaderCompatState {
     if (time < this.lastOnThemePageTime) {
       return;
     }
+    // A release scheduled before a newer claim must not win.
+    if (!onAppPage && this.themePageClaims > 0) {
+      return;
+    }
     this.onThemePage = onAppPage;
     this.lastOnThemePageTime = time;
     this.forceUpdate();
-  }
-
-  registerAudioPlayer(player: HTMLAudioElement) {
-    this.activeAudioPlayer = player;
-    if (this.gamesRunning.length > 0) {
-      player.pause();
-    }
-  }
-
-  unregisterAudioPlayer(player: HTMLAudioElement) {
-    if (this.activeAudioPlayer === player) {
-      this.activeAudioPlayer = null;
-    }
   }
 
   private forceUpdate() {
@@ -102,8 +115,8 @@ export class AudioLoaderCompatState {
       this.setAudioLoaderEnabled(this.gamesRunning.length === 0);
     }
 
-    if (this.activeAudioPlayer && this.gamesRunning.length > 0) {
-      this.activeAudioPlayer.pause();
+    if (this.gamesRunning.length > 0) {
+      pauseAllAudio();
     }
 
     this.eventBus.dispatchEvent(new Event('stateUpdate'));
@@ -111,7 +124,13 @@ export class AudioLoaderCompatState {
 }
 
 const AudioLoaderCompatStateContext =
-  createContext<PublicAudioLoaderCompatStateContext>(null as any);
+  createContext<PublicAudioLoaderCompatStateContext>({
+    gamesRunning: [],
+    onAppPage: false,
+    suspended: false,
+    setGamesRunning: () => {},
+    setOnThemePage: () => {}
+  });
 export const useAudioLoaderCompatState = () =>
   useContext(AudioLoaderCompatStateContext);
 
@@ -137,6 +156,8 @@ export const AudioLoaderCompatStateContextProvider: FC<ProviderProps> = ({
       'stateUpdate',
       onUpdate
     );
+    // Catch updates that happened between first render and subscribing.
+    onUpdate();
 
     return () =>
       AudioLoaderCompatStateClass.eventBus.removeEventListener(
@@ -149,19 +170,13 @@ export const AudioLoaderCompatStateContextProvider: FC<ProviderProps> = ({
     AudioLoaderCompatStateClass.setGamesRunning(gamesRunning);
   const setOnThemePage = (onAppPage: boolean) =>
     AudioLoaderCompatStateClass.setOnThemePage(onAppPage);
-  const registerAudioPlayer = (player: HTMLAudioElement) =>
-    AudioLoaderCompatStateClass.registerAudioPlayer(player);
-  const unregisterAudioPlayer = (player: HTMLAudioElement) =>
-    AudioLoaderCompatStateClass.unregisterAudioPlayer(player);
 
   return (
     <AudioLoaderCompatStateContext.Provider
       value={{
         ...publicState,
         setGamesRunning,
-        setOnThemePage,
-        registerAudioPlayer,
-        unregisterAudioPlayer
+        setOnThemePage
       }}
     >
       {children}
