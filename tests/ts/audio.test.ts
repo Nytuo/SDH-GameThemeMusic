@@ -3,8 +3,13 @@ import { call } from '@decky/api';
 import {
   getProviderFromId,
   getResolver,
-  getResolverForVideoId
-} from '../src/actions/audio';
+  getResolverForVideoId,
+  ITunesAudioResolver,
+  KhinsiderAudioResolver,
+  LocalMusicAudioResolver,
+  resolveDownloadHref,
+  YtDlpAudioResolver
+} from '../../src/actions/audio';
 
 const mockCall = call as unknown as ReturnType<typeof vi.fn>;
 
@@ -23,15 +28,28 @@ describe('getProviderFromId', () => {
     ['itunes_123', 'itunes'],
     ['local_my_song', 'local'],
     ['dQw4w9WgXcQ', 'ytdlp'],
-    ['', 'ytdlp']
+    ['', 'ytdlp'],
+    ['https://www.youtube.com/watch?v=abc', 'ytdlp'],
+    ['https://youtu.be/abc', 'ytdlp'],
+    [
+      'https://downloads.khinsider.com/game-soundtracks/album/x/01.mp3',
+      'khinsider'
+    ]
   ])('%s -> %s', (id, provider) => {
     expect(getProviderFromId(id)).toBe(provider);
   });
 
-  it('getResolverForVideoId returns a resolver for each provider', () => {
-    expect(getResolverForVideoId('itunes_1')).toBeDefined();
-    expect(getResolverForVideoId('local_1')).toBeDefined();
-    expect(getResolverForVideoId('abc')).toBeDefined();
+  it('getResolverForVideoId picks the matching resolver class', () => {
+    expect(getResolverForVideoId('itunes_1')).toBeInstanceOf(
+      ITunesAudioResolver
+    );
+    expect(getResolverForVideoId('local_1')).toBeInstanceOf(
+      LocalMusicAudioResolver
+    );
+    expect(getResolverForVideoId('abc')).toBeInstanceOf(YtDlpAudioResolver);
+    expect(
+      getResolverForVideoId('https://downloads.khinsider.com/album/a/b')
+    ).toBeInstanceOf(KhinsiderAudioResolver);
   });
 });
 
@@ -111,12 +129,12 @@ describe('iTunes resolver', () => {
     expect(url).toBe('data:audio/mp4;base64,AAA');
   });
 
-  it('refuses to download without a url', async () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('downloads via the backend lookup when no url is known', async () => {
+    mockCall.mockResolvedValue(undefined);
     expect(await getResolver('itunes').downloadAudio({ id: 'itunes_1' })).toBe(
-      false
+      true
     );
-    spy.mockRestore();
+    expect(mockCall).toHaveBeenCalledWith('download_url', '', 'itunes_1');
   });
 });
 
@@ -167,5 +185,95 @@ describe('AudioResolver.getAudio', () => {
       method === 'next_yt_result' ? null : undefined
     );
     expect(await getResolver('ytdlp').getAudio('Nothing')).toBeUndefined();
+  });
+});
+
+describe('KHInsider resolver', () => {
+  const albumPage = `
+    <table>
+      <tr><td><img src="/cover.jpg"></td>
+      <td><a href="/game-soundtracks/album/zelda">Zelda OST</a></td></tr>
+    </table>`;
+  const tracksPage = `
+    <table id="songlist">
+      <tr><td class="clickable-row"><a href="/game-soundtracks/album/zelda/01.mp3">Title Theme</a></td></tr>
+      <tr><td class="clickable-row"><a href="/game-soundtracks/album/zelda/02.mp3">Overworld</a></td></tr>
+    </table>`;
+  const trackPage = `<audio src="https://vgm.cdn/zelda/01.mp3"></audio>`;
+
+  it('scrapes albums then tracks', async () => {
+    mockCall.mockImplementation(async (method: string, url: string) => {
+      if (method !== 'fetch_url') throw new Error(method);
+      if (url.includes('/search')) return albumPage;
+      if (url.endsWith('/album/zelda')) return tracksPage;
+      return '';
+    });
+    const out = await collect(
+      getResolver('khinsider').getSearchResults('Zelda')
+    );
+    expect(out).toEqual([
+      {
+        id: 'https://downloads.khinsider.com/game-soundtracks/album/zelda/01.mp3',
+        title: 'Title Theme (Zelda OST)',
+        thumbnail: 'https://downloads.khinsider.com/cover.jpg'
+      },
+      {
+        id: 'https://downloads.khinsider.com/game-soundtracks/album/zelda/02.mp3',
+        title: 'Overworld (Zelda OST)',
+        thumbnail: 'https://downloads.khinsider.com/cover.jpg'
+      }
+    ]);
+  });
+
+  it('prefers an already downloaded file', async () => {
+    mockCall.mockImplementation(async (method: string) =>
+      method === 'local_audio_url' ? 'data:audio/mpeg;base64,AA' : ''
+    );
+    expect(
+      await getResolver('khinsider').getAudioUrlFromVideo({ id: 'https://x' })
+    ).toBe('data:audio/mpeg;base64,AA');
+  });
+
+  it('extracts the audio source from the track page', async () => {
+    mockCall.mockImplementation(async (method: string) =>
+      method === 'fetch_url' ? trackPage : null
+    );
+    expect(
+      await getResolver('khinsider').getAudioUrlFromVideo({ id: 'https://x' })
+    ).toBe('https://vgm.cdn/zelda/01.mp3');
+  });
+
+  it('downloadAudio resolves then downloads', async () => {
+    mockCall.mockImplementation(async (method: string) => {
+      if (method === 'local_audio_exists') return false;
+      if (method === 'local_audio_url') return null;
+      if (method === 'fetch_url') return trackPage;
+      return undefined;
+    });
+    expect(
+      await getResolver('khinsider').downloadAudio({ id: 'https://x' })
+    ).toBe(true);
+    expect(mockCall).toHaveBeenCalledWith(
+      'download_url',
+      'https://vgm.cdn/zelda/01.mp3',
+      'https://x'
+    );
+  });
+});
+
+describe('resolveDownloadHref', () => {
+  it('accepts supported audio extensions', () => {
+    expect(resolveDownloadHref('/download/track.mp3')).toBe(
+      'https://downloads.khinsider.com/download/track.mp3'
+    );
+    expect(resolveDownloadHref('https://cdn.example.com/track.ogg')).toBe(
+      'https://cdn.example.com/track.ogg'
+    );
+  });
+
+  it('rejects non-audio extensions and empty values', () => {
+    expect(resolveDownloadHref('/download/track.zip')).toBeUndefined();
+    expect(resolveDownloadHref(null)).toBeUndefined();
+    expect(resolveDownloadHref('')).toBeUndefined();
   });
 });

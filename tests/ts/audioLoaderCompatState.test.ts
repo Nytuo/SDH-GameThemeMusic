@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AudioLoaderCompatState } from '../src/state/AudioLoaderCompatState';
+import { AudioLoaderCompatState } from '../../src/state/AudioLoaderCompatState';
 import { FakeAudio } from './fakeAudio';
 
 describe('AudioLoaderCompatState', () => {
-  let menuMusic: { play: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> };
+  let menuMusic: {
+    play: ReturnType<typeof vi.fn>;
+    pause: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     vi.useFakeTimers();

@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import datetime
+import glob
+import hashlib
 import json
 import logging
 import os
@@ -24,6 +26,54 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("GameThemeMusic")
+
+AUDIO_EXTENSIONS = (
+    "mp3", "ogg", "flac", "m4a", "wav", "aac", "opus", "webm", "weba", "mp4",
+)
+
+MIME_TYPES = {
+    "mp3": "audio/mpeg",
+    "m4a": "audio/mp4",
+    "mp4": "audio/mp4",
+    "webm": "audio/webm",
+    "weba": "audio/webm",
+    "ogg": "audio/ogg",
+    "opus": "audio/ogg",
+    "wav": "audio/wav",
+    "flac": "audio/flac",
+    "aac": "audio/aac",
+}
+
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
+
+
+def get_audio_filename(id: str) -> str:
+    """
+    File stem used to store audio for a media id. URL ids (KHInsider) are
+    hashed so they are filesystem safe.
+    """
+    if id.startswith("https://") or id.startswith("http://"):
+        return hashlib.md5(id.encode()).hexdigest()
+    return id
+
+
+def infer_download_extension(url: str) -> str:
+    ext = url.split("?", 1)[0].rsplit(".", 1)[-1].lower()
+    if ext not in AUDIO_EXTENSIONS:
+        return "webm"
+    return ext
+
+
+def to_data_url(path: str) -> str:
+    extension = Path(path).suffix.lstrip(".").lower()
+    mime_type = MIME_TYPES.get(extension, f"audio/{extension}")
+    with open(path, "rb") as file:
+        return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
 
 
 class Plugin:
@@ -270,6 +320,23 @@ class Plugin:
         
         return False
 
+    async def update_yt_dlp(self):
+        """
+        Manually triggered yt-dlp update (settings button).
+        :return: dict with 'success' and 'message'
+        """
+        try:
+            updated = await self.check_and_update_ytdlp()
+            version = await self.get_ytdlp_version()
+            if updated:
+                return {"success": True, "message": f"Updated yt-dlp to {version}"}
+            if version is not None:
+                return {"success": True, "message": f"yt-dlp is up to date ({version})"}
+            return {"success": False, "message": "Could not update yt-dlp"}
+        except Exception as e:
+            logger.error(f"Error updating yt-dlp: {e}")
+            return {"success": False, "message": f"Error updating yt-dlp: {e}"}
+
     async def search_yt(self, term: str):
         """Search YouTube using yt-dlp."""
         logger.info(f"Searching YouTube for: {term}")
@@ -335,12 +402,28 @@ class Plugin:
 
     @staticmethod
     def entry_to_info(entry):
+        thumbnails = entry.get("thumbnails") or []
+        thumbnail = entry.get("thumbnail") or (
+            thumbnails[0].get("url") if thumbnails else None
+        )
         return {
-            "url": entry["url"],
-            "title": entry["title"],
-            "id": entry["id"],
-            "thumbnail": entry["thumbnail"],
+            "url": entry.get("url"),
+            "title": entry.get("title"),
+            "id": entry.get("id"),
+            "thumbnail": thumbnail,
         }
+
+    async def fetch_url(self, url: str) -> str:
+        """Fetch a web page as text (used by the KHInsider scraper)."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, headers=BROWSER_HEADERS, timeout=10, ssl=self.ssl_context
+                ) as response:
+                    return await response.text()
+        except Exception as e:
+            logger.error(f"fetch_url error for {url}: {e}")
+            return ""
 
     def local_match(self, id_local: str) -> str | None:
         """
@@ -348,9 +431,13 @@ class Plugin:
         :param id_local: str ID to match
         :return: str | None Path to local file if found, else None
         """
-        music_path = Path(self.music_path)
+        pattern = os.path.join(
+            glob.escape(self.music_path), f"{glob.escape(id_local)}.*"
+        )
         local_matches = [
-            str(x) for x in music_path.glob(f"{id_local}.*") if x.is_file()
+            x for x in glob.glob(pattern)
+            if os.path.isfile(x)
+            and x.rsplit(".", 1)[-1].lower() in AUDIO_EXTENSIONS
         ]
         if len(local_matches) == 0:
             logger.debug(f"No local match found for ID: {id_local}")
@@ -369,15 +456,11 @@ class Plugin:
         :return: str | None Audio URL or None if not found
         """
         logger.info(f"Getting audio URL for YouTube ID: {id_yt}")
-        local_match = self.local_match(id_yt)
+        local_match = self.local_match(get_audio_filename(id_yt))
         if local_match is not None:
-            extension = Path(local_match).suffix.lstrip('.')
             logger.debug(f"Using local file: {local_match}")
             try:
-                with open(local_match, "rb") as file:
-                    data_url = f"data:audio/{extension};base64,{base64.b64encode(file.read()).decode()}"
-                    logger.info(f"Returning base64-encoded local file for ID: {id_yt}")
-                    return data_url
+                return to_data_url(local_match)
             except Exception as e:
                 logger.error(f"Error reading local file {local_match}: {e}")
 
@@ -387,10 +470,13 @@ class Plugin:
         try:
             result = await asyncio.create_subprocess_exec(
                 ytdlp_path,
-                f"{id_yt}",
                 "-j",
                 "-f",
-                "bestaudio",
+                "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
+                "--no-playlist",
+                "--no-warnings",
+                "--",
+                id_yt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._get_env(),
@@ -416,7 +502,8 @@ class Plugin:
         :param id_yt: str YouTube video ID
         :return: None
         """
-        if self.local_match(id_yt) is not None:
+        filename = get_audio_filename(id_yt)
+        if self.local_match(filename) is not None:
             logger.info(f"Audio already downloaded for ID: {id_yt}")
             return
 
@@ -426,13 +513,16 @@ class Plugin:
         try:
             yt_dlp_cmd = [
                 ytdlp_path,
-                f"{id_yt}",
                 "-f",
-                "bestaudio",
+                "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
                 "-o",
-                "%(id)s.%(ext)s",
+                f"{filename}.%(ext)s",
                 "-P",
                 self.music_path,
+                "--no-playlist",
+                "--no-warnings",
+                "--",
+                id_yt,
             ]
             logger.info(f"Running yt-dlp command: {yt_dlp_cmd}")
             logger.info(f"Working directory: {os.getcwd()}")
@@ -457,9 +547,8 @@ class Plugin:
             if process.returncode == 0:
                 logger.info(f"Successfully downloaded audio for ID: {id_yt}")
             else:
-                logger.error(f"yt-dlp failed with return code {process.returncode}")
-                if stderr:
-                    logger.error(f"yt-dlp stderr: {stderr.decode()}")
+                err = stderr.decode(errors="replace") if stderr else "Unknown error"
+                raise RuntimeError(f"yt-dlp failed ({process.returncode}): {err}")
         except Exception as e:
             logger.error(f"Error downloading audio for ID {id_yt}: {e}")
             raise
@@ -473,13 +562,22 @@ class Plugin:
         :return: None
         """
         logger.info(f"Downloading audio for ID: {id_to_save_as}")
+        if url.startswith("data:"):
+            logger.info("Skipping download because URL is already local audio data")
+            return
         if id_to_save_as.startswith("itunes_"):
             logger.info(f"ID {id_to_save_as} detected as iTunes, using download_itunes for more accurate handling")
             await self.download_itunes(id_to_save_as)
             return
         try:
+            headers = dict(BROWSER_HEADERS)
+            if "khinsider.com" in url or "khinsider.com" in id_to_save_as:
+                headers["Referer"] = (
+                    id_to_save_as if id_to_save_as.startswith("https://")
+                    else "https://downloads.khinsider.com/"
+                )
             async with aiohttp.ClientSession() as session:
-                res = await session.get(url, ssl=self.ssl_context)
+                res = await session.get(url, headers=headers, ssl=self.ssl_context)
                 res.raise_for_status()
                 try:
                     from urllib.parse import urlparse
@@ -503,7 +601,10 @@ class Plugin:
                     else:
                         ext = 'webm'
 
-                file_path = Path(self.music_path) / f"{id_to_save_as}.{ext}"
+                file_path = (
+                    Path(self.music_path)
+                    / f"{get_audio_filename(id_to_save_as)}.{ext}"
+                )
                 with open(file_path, "wb") as file:
                     async for chunk in res.content.iter_chunked(1024):
                         file.write(chunk)
@@ -697,6 +798,20 @@ class Plugin:
             logger.error(f"Error reading local music file {local_match}: {e}")
             return None
 
+    async def local_audio_url(self, id: str):
+        """Return a data URL for an already downloaded track, or None."""
+        local_match = self.local_match(get_audio_filename(id))
+        if local_match is None:
+            return None
+        try:
+            return to_data_url(local_match)
+        except Exception as e:
+            logger.error(f"Error reading local file {local_match}: {e}")
+            return None
+
+    async def local_audio_exists(self, id: str) -> bool:
+        return self.local_match(get_audio_filename(id)) is not None
+
     async def save_local_music(self, file_path: str, custom_name: str = ""):
         """
         Import/save a music file from anywhere on the filesystem to the music directory.
@@ -849,6 +964,8 @@ class Plugin:
     async def list_cache_backups(self):
         """List all available cache backups."""
         cache_path = Path(self.cache_path)
+        if not cache_path.is_dir():
+            return []
         backups = [
             file.stem for file in cache_path.glob("*.json") if file.is_file()
         ]

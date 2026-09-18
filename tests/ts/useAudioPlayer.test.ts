@@ -8,12 +8,12 @@ const compat = {
   unregisterAudioPlayer: vi.fn()
 };
 
-vi.mock('../src/state/AudioLoaderCompatState', () => ({
+vi.mock('../../src/state/AudioLoaderCompatState', () => ({
   useAudioLoaderCompatState: () => compat
 }));
 
-import GlobalAudioPlayer from '../src/lib/globalAudioPlayer';
-import useAudioPlayer from '../src/hooks/useAudioPlayer';
+import GlobalAudioPlayer from '../../src/lib/globalAudioPlayer';
+import useAudioPlayer from '../../src/hooks/useAudioPlayer';
 
 let audio: ReturnType<typeof installFakeAudio>;
 

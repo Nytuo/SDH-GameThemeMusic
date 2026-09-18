@@ -10,7 +10,7 @@ beforeEach(() => {
 });
 
 async function load() {
-  return await import('../src/hooks/useSettings');
+  return await import('../../src/hooks/useSettings');
 }
 
 describe('useSettings', () => {

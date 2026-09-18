@@ -1,5 +1,5 @@
-import { definePlugin, staticClasses } from '@decky/ui';
-import { routerHook } from '@decky/api';
+import { staticClasses } from '@decky/ui';
+import { definePlugin, routerHook } from '@decky/api';
 
 import { GiMusicalNotes } from 'react-icons/gi';
 
@@ -40,7 +40,14 @@ export default definePlugin(() => {
     }
   );
 
-  const patchedMenu = patchContextMenu(LibraryContextMenu);
+  let patchedMenu: { unpatch: () => void } | null = null;
+  try {
+    if (LibraryContextMenu) {
+      patchedMenu = patchContextMenu(LibraryContextMenu);
+    }
+  } catch (e) {
+    console.warn('[GameThemeMusic] Failed to patch context menu:', e);
+  }
 
   const AppStateRegistrar =
     SteamClient.GameSessions.RegisterForAppLifetimeNotifications(
@@ -60,7 +67,8 @@ export default definePlugin(() => {
     );
 
   return {
-    title: <div className={staticClasses.Title}>{name}</div>,
+    name,
+    titleView: <div className={staticClasses.Title}>{name}</div>,
     icon: <GiMusicalNotes />,
     content: <Settings />,
     onDismount() {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getResolverForVideoId } from '../actions/audio';
 
 import { getCache, updateCache } from '../cache/musicCache';
+import { isCachedNoMusic } from '../lib/videoId';
 import { useSettings } from './useSettings';
 
 const useThemeMusic = (appId: number) => {
@@ -18,7 +19,7 @@ const useThemeMusic = (appId: number) => {
     let ignore = false;
     async function getData() {
       const cache = await getCache(appId);
-      if (cache?.videoId?.length == 0) {
+      if (isCachedNoMusic(cache?.videoId)) {
         return setAudio({ videoId: '', audioUrl: '' });
       } else if (cache?.videoId?.length) {
         const resolver = getResolverForVideoId(cache.videoId);

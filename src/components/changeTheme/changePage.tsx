@@ -5,18 +5,19 @@ import {
   PanelSection,
   PanelSectionRow,
   showModal,
-  SteamSpinner,
   TextField,
   useParams
 } from '@decky/ui';
 import { useEffect, useState } from 'react';
+import SteamSpinner from '../steamSpinner';
 import { useSettings } from '../../hooks/useSettings';
 import AudioPlayer from './audioPlayer';
 import { getCache, updateCache } from '../../cache/musicCache';
 import useTranslations from '../../hooks/useTranslations';
-import { YouTubeVideoPreview } from '../../../types/YouTube';
+import { MediaContentPreview } from '../../../types/media';
 import NoMusic from './noMusic';
-import { getResolver } from '../../actions/audio';
+import { getResolverForVideoId } from '../../actions/audio';
+import { shouldSkipAudioDownload } from '../../lib/videoId';
 import LocalMusicImport from './localMusicImport';
 
 export default function ChangePage({
@@ -27,7 +28,7 @@ export default function ChangePage({
   loading,
   videos
 }: {
-  videos: (YouTubeVideoPreview & { isPlaying: boolean })[];
+  videos: (MediaContentPreview & { isPlaying: boolean })[];
   loading: boolean;
   handlePlay: (idx: number, startPlaying: boolean) => void;
   customSearch: (term: string) => void;
@@ -57,15 +58,8 @@ export default function ChangePage({
     videoId: string;
     audioUrl: string;
   }) {
-    let provider: 'ytdlp' | 'itunes' | 'local' = 'ytdlp';
-    if (audio.videoId.startsWith('itunes_')) {
-      provider = 'itunes';
-    } else if (audio.videoId.startsWith('local_')) {
-      provider = 'local';
-    }
-
-    if (provider !== 'local') {
-      const success = await getResolver(provider).downloadAudio({
+    if (!shouldSkipAudioDownload(audio.videoId)) {
+      const success = await getResolverForVideoId(audio.videoId).downloadAudio({
         id: audio.videoId,
         url: audio.audioUrl
       });

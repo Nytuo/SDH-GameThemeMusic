@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import useTranslations from '../../hooks/useTranslations';
 import ChangePage from './changePage';
 import AboutPage from './aboutPage';
-import { getResolver } from '../../actions/audio';
-import { YouTubeVideoPreview } from '../../../types/YouTube';
+import { getResolver, SEARCH_PROVIDERS } from '../../actions/audio';
+import { MediaContentPreview } from '../../../types/media';
 import GameSettings from './gameSettings';
 import { useSettings } from '../../hooks/useSettings';
 
@@ -18,7 +18,7 @@ export default function ChangeTheme() {
   const appName = appDetails?.display_name?.replace(/([™®©])/g, '');
 
   const [videos, setVideos] = useState<
-    (YouTubeVideoPreview & { isPlaying: boolean })[]
+    (MediaContentPreview & { isPlaying: boolean })[]
   >([]);
   const [loadingNum, setLoadingNum] = useState(0);
   const initialSearch = appName?.concat(' main theme') ?? '';
@@ -30,10 +30,10 @@ export default function ChangeTheme() {
       setLoadingNum((x) => x + 1);
       setVideos([]);
 
-      const providers = ['ytdlp', 'itunes', 'local'] as const;
+      const providers = SEARCH_PROVIDERS;
       const promises = providers.map(async (provider) => {
         const resolver = getResolver(provider);
-        const results: (YouTubeVideoPreview & { isPlaying: boolean })[] = [];
+        const results: (MediaContentPreview & { isPlaying: boolean })[] = [];
         try {
           for await (const video of resolver.getSearchResults(searchTerm)) {
             if (ignore) break;

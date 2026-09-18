@@ -1,9 +1,9 @@
 import { DialogButton, Focusable } from '@decky/ui';
 import { useEffect, useState } from 'react';
 import useTranslations from '../../hooks/useTranslations';
-import { getResolverForVideoId } from '../../actions/audio';
-import { YouTubeVideoPreview } from '../../../types/YouTube';
-import { FaCheck } from 'react-icons/fa';
+import { getProviderFromId, getResolverForVideoId } from '../../actions/audio';
+import { MediaContentPreview } from '../../../types/media';
+import { FaCheck, FaCompactDisc, FaFolder } from 'react-icons/fa';
 import { SiYoutubemusic, SiItunes } from 'react-icons/si';
 import Spinner from '../spinner';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
@@ -14,7 +14,7 @@ export default function AudioPlayer({
   video,
   volume
 }: {
-  video: YouTubeVideoPreview & { isPlaying: boolean };
+  video: MediaContentPreview & { isPlaying: boolean };
   volume: number;
   handlePlay: (startPlaying: boolean) => void;
   selected: boolean;
@@ -75,8 +75,23 @@ export default function AudioPlayer({
   }
 
   if (!loading && !audioUrl) return <></>;
-  const isItunes = video.id?.startsWith('itunes_');
-  const badge = isItunes ? (
+  const provider = getProviderFromId(video.id);
+  const isItunes = provider === 'itunes';
+  const badgeInfo = {
+    itunes: { color: '#d82d2d', icon: <SiItunes size={16} />, label: 'iTunes' },
+    khinsider: {
+      color: '#2d6fd8',
+      icon: <FaCompactDisc size={16} />,
+      label: 'KHInsider'
+    },
+    local: { color: '#3a8f3a', icon: <FaFolder size={16} />, label: 'Local' },
+    ytdlp: {
+      color: '#e62117',
+      icon: <SiYoutubemusic size={16} />,
+      label: 'YouTube'
+    }
+  }[provider];
+  const badge = (
     <div
       style={{
         position: 'absolute',
@@ -87,34 +102,15 @@ export default function AudioPlayer({
         padding: '2px 6px',
         display: 'flex',
         alignItems: 'center',
+        gap: 4,
         fontSize: '12px',
         fontWeight: 600,
-        color: '#d82d2d',
+        color: badgeInfo.color,
         zIndex: 2
       }}
     >
-      <SiItunes size={16} style={{ marginRight: 4 }} />
-      iTunes
-    </div>
-  ) : (
-    <div
-      style={{
-        position: 'absolute',
-        top: 6,
-        left: 6,
-        background: 'rgba(255,255,255,0.85)',
-        borderRadius: '4px',
-        padding: '2px 6px',
-        display: 'flex',
-        alignItems: 'center',
-        fontSize: '12px',
-        fontWeight: 600,
-        color: '#e62117',
-        zIndex: 2
-      }}
-    >
-      <SiYoutubemusic size={16} style={{ marginRight: 4 }} />
-      YouTube
+      {badgeInfo.icon}
+      {badgeInfo.label}
     </div>
   );
   return (

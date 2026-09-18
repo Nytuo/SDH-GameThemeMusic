@@ -12,6 +12,7 @@ import {
   SliderField,
   ToggleField
 } from '@decky/ui';
+import { useState } from 'react';
 import { SiCrowdin, SiDiscord, SiGithub, SiKofi } from 'react-icons/si';
 import { useSettings } from '../../hooks/useSettings';
 import useTranslations from '../../hooks/useTranslations';
@@ -19,6 +20,7 @@ import {
   FaDownload,
   FaUndo,
   FaSave,
+  FaSync,
   FaVolumeMute,
   FaVolumeUp
 } from 'react-icons/fa';
@@ -30,8 +32,8 @@ import {
   importCache,
   listCacheBackups
 } from '../../cache/musicCache';
-import { toaster } from '@decky/api';
-import { getResolver } from '../../actions/audio';
+import { call, toaster } from '@decky/api';
+import { getResolverForVideoId } from '../../actions/audio';
 import PanelSocialButton from './socialButton';
 
 export default function Index() {
@@ -39,6 +41,33 @@ export default function Index() {
     useSettings();
 
   const t = useTranslations();
+  const [isUpdatingYtDlp, setIsUpdatingYtDlp] = useState(false);
+
+  async function updateYtDlp() {
+    setIsUpdatingYtDlp(true);
+    try {
+      const result = await call<[], { success: boolean; message: string }>(
+        'update_yt_dlp'
+      );
+      toaster.toast({
+        title: result.success
+          ? t('updateYtDlpSuccess')
+          : t('updateYtDlpFailed'),
+        body: result.message,
+        icon: <FaSync />,
+        duration: result.success ? 3000 : 5000
+      });
+    } catch (error) {
+      toaster.toast({
+        title: t('updateYtDlpFailed'),
+        body: error instanceof Error ? error.message : String(error),
+        icon: <FaSync />,
+        duration: 5000
+      });
+    } finally {
+      setIsUpdatingYtDlp(false);
+    }
+  }
 
   const confirmClearCache = () => {
     showModal(
@@ -60,7 +89,9 @@ export default function Index() {
   };
 
   const confirmRestoreDownloads = async () => {
-    const num = Object.values(await getFullCache()).length;
+    const num = Object.values(await getFullCache()).filter(
+      (entry) => entry.videoId?.length
+    ).length;
     const modal = showModal(
       <ConfirmModal
         strTitle={t('restoreDownloadsConfirm')}
@@ -125,22 +156,27 @@ export default function Index() {
       );
     }
 
-    const cached = Object.values(await getFullCache());
-    const resolver = getResolver('ytdlp');
+    const cached = Object.values(await getFullCache()).filter(
+      (entry) => entry.videoId?.length
+    );
+    let failed = 0;
 
     for (let index = 0; index < cached.length; index++) {
-      const element = cached[index];
-      if (element.videoId !== undefined) {
-        modal.Update(getProgressModal(index, cached.length));
-        await resolver.downloadAudio({ id: element.videoId });
-      }
+      const videoId = cached[index].videoId as string;
+      const resolver = getResolverForVideoId(videoId);
+      modal.Update(getProgressModal(index, cached.length));
+
+      if (await resolver.isDownloaded({ id: videoId })) continue;
+      if (!(await resolver.downloadAudio({ id: videoId }))) failed++;
     }
     modal.Close();
     toaster.toast({
-      title: t('downloadRestoreSuccessful'),
-      body: t('downloadRestoreSuccessfulDetails'),
+      title: failed ? t('downloadFailed') : t('downloadRestoreSuccessful'),
+      body: failed
+        ? t('downloadFailedDetail')
+        : t('downloadRestoreSuccessfulDetails'),
       icon: <FaDownload />,
-      duration: 1500
+      duration: failed ? 3000 : 1500
     });
   }
 
@@ -182,6 +218,17 @@ export default function Index() {
               setHomepageFocusMode(newVal);
             }}
           />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            label={t('updateYtDlpLabel')}
+            description={t('updateYtDlpDescription')}
+            layout="below"
+            disabled={isUpdatingYtDlp}
+            onClick={updateYtDlp}
+          >
+            {isUpdatingYtDlp ? t('updating') : t('updateYtDlp')}
+          </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
           <ButtonItem

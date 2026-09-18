@@ -54,3 +54,5 @@ out/
 coverage.xml
 htmlcov/
 .pytest_cache/
+output/
+build.bat

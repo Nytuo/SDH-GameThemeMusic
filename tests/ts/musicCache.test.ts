@@ -30,7 +30,7 @@ import {
   importCache,
   listCacheBackups,
   clearDownloads
-} from '../src/cache/musicCache';
+} from '../../src/cache/musicCache';
 
 const mockCall = call as unknown as ReturnType<typeof vi.fn>;
 
