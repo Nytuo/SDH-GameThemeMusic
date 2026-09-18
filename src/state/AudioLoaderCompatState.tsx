@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createContext, FC, useContext, useEffect, useState } from 'react';
 
 interface PublicAudioLoaderCompatState {
