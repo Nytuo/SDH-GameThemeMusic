@@ -1,10 +1,14 @@
 import '@testing-library/jest-dom';
+import * as React from 'react';
 import { vi } from 'vitest';
+
+// The plugin is compiled with jsxFactory = window.SP_REACT.createElement.
+(window as any).SP_REACT = React;
 
 vi.mock('@decky/ui', () => ({
   definePlugin: vi.fn(),
   staticClasses: {},
-  useParams: vi.fn(),
+  useParams: vi.fn(() => ({})),
   afterPatch: vi.fn(),
   fakeRenderComponent: vi.fn((component) => ({ type: component })),
   findInReactTree: vi.fn(),
@@ -21,6 +25,7 @@ vi.mock('@decky/ui', () => ({
 }));
 
 vi.mock('@decky/api', () => ({
+  call: vi.fn(),
   routerHook: {
     addPatch: vi.fn(),
     addRoute: vi.fn(),
@@ -35,25 +40,18 @@ vi.mock('@decky/manifest', () => ({
   name: 'Game Theme Music'
 }));
 
-global.SteamClient = {
+(globalThis as any).SteamClient = {
   GameSessions: {
     RegisterForAppLifetimeNotifications: vi.fn(() => ({
       unregister: vi.fn()
     }))
+  },
+  UI: {
+    RegisterForUIModeChanged: vi.fn(() => ({ unregister: vi.fn() })),
+    GetUIMode: vi.fn(() => Promise.resolve(4))
   }
-} as any;
+};
 
-global.Audio = vi.fn().mockImplementation(() => ({
-  play: vi.fn().mockResolvedValue(undefined),
-  pause: vi.fn(),
-  load: vi.fn(),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  src: '',
-  currentTime: 0,
-  duration: 0,
-  paused: true,
-  volume: 1,
-  loop: false,
-  readyState: 4
-}));
+(globalThis as any).appStore = {
+  GetAppOverviewByGameID: vi.fn(() => ({ display_name: 'Test Game' }))
+};

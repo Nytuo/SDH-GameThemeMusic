@@ -48,3 +48,9 @@ backend/out
 cli/
 out/
 /.vscode/
+
+# Test artifacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/

@@ -1,133 +1,102 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import GlobalAudioPlayer from '../src/lib/globalAudioPlayer';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { FakeAudio, installFakeAudio } from './fakeAudio';
+
+const compat = {
+  setOnThemePage: vi.fn(),
+  registerAudioPlayer: vi.fn(),
+  unregisterAudioPlayer: vi.fn()
+};
 
 vi.mock('../src/state/AudioLoaderCompatState', () => ({
-  useAudioLoaderCompatState: () => ({
-    setOnThemePage: vi.fn(),
-    registerAudioPlayer: vi.fn(),
-    unregisterAudioPlayer: vi.fn()
-  })
+  useAudioLoaderCompatState: () => compat
 }));
 
+import GlobalAudioPlayer from '../src/lib/globalAudioPlayer';
+import useAudioPlayer from '../src/hooks/useAudioPlayer';
+
+let audio: ReturnType<typeof installFakeAudio>;
+
+beforeEach(() => {
+  audio = installFakeAudio();
+  (GlobalAudioPlayer as any).instance = null;
+  Object.values(compat).forEach((fn) => fn.mockClear());
+});
+
+function element(): FakeAudio {
+  return GlobalAudioPlayer.getInstance().getAudioElement() as unknown as FakeAudio;
+}
+
 describe('GlobalAudioPlayer', () => {
-  let mockAudioElement: any;
+  it('is a looping singleton', () => {
+    const a = GlobalAudioPlayer.getInstance();
+    const b = GlobalAudioPlayer.getInstance();
+    expect(a).toBe(b);
+    expect(audio.ctor).toHaveBeenCalledTimes(1);
+    expect(a.getAudioElement().loop).toBe(true);
+    expect(a.getAudioElement().preload).toBe('auto');
+  });
+});
 
-  beforeEach(() => {
-    mockAudioElement = {
-      src: '',
-      loop: false,
-      volume: 1,
-      paused: true,
-      ended: false,
-      currentTime: 0,
-      readyState: 4, // HAVE_ENOUGH_DATA
-      preload: 'none',
-      play: vi.fn().mockResolvedValue(undefined),
-      pause: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn()
-    };
-
-    global.Audio = vi.fn(() => mockAudioElement) as any;
-
-    (GlobalAudioPlayer as any).instance = null;
+describe('useAudioPlayer', () => {
+  it('registers with the compat state and unregisters on unmount', () => {
+    const { unmount } = renderHook(() => useAudioPlayer(undefined));
+    expect(compat.registerAudioPlayer).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(compat.unregisterAudioPlayer).toHaveBeenCalledTimes(1);
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
+  it('loads the url and becomes ready on canplaythrough', () => {
+    const { result } = renderHook(() => useAudioPlayer('https://a'));
+    expect(element().src).toBe('https://a');
+    expect(result.current.isReady).toBe(false);
+
+    act(() => element().becomeReady());
+    expect(result.current.isReady).toBe(true);
   });
 
-  it('should create singleton instance', () => {
-    const instance1 = GlobalAudioPlayer.getInstance();
-    const instance2 = GlobalAudioPlayer.getInstance();
-
-    expect(instance1).toBe(instance2);
-    expect(global.Audio).toHaveBeenCalledTimes(1);
+  it('does not play before the audio is ready', () => {
+    const { result } = renderHook(() => useAudioPlayer('https://a'));
+    act(() => result.current.play());
+    expect(element().play).not.toHaveBeenCalled();
+    expect(result.current.isPlaying).toBe(false);
   });
 
-  it('should initialize audio element with correct settings', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
+  it('play / stop / togglePlay', () => {
+    const { result } = renderHook(() => useAudioPlayer('https://a'));
+    act(() => element().becomeReady());
 
-    expect(element.preload).toBe('auto');
-    expect(element.loop).toBe(true);
+    act(() => result.current.play());
+    expect(element().play).toHaveBeenCalled();
+    expect(result.current.isPlaying).toBe(true);
+
+    element().currentTime = 12;
+    act(() => result.current.stop());
+    expect(element().pause).toHaveBeenCalled();
+    expect(element().currentTime).toBe(0);
+    expect(result.current.isPlaying).toBe(false);
+
+    act(() => result.current.togglePlay());
+    expect(result.current.isPlaying).toBe(true);
   });
 
-  it('should return the same audio element', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element1 = player.getAudioElement();
-    const element2 = player.getAudioElement();
-
-    expect(element1).toBe(element2);
-    expect(element1).toBe(mockAudioElement);
+  it('pause only pauses a playing element', () => {
+    const { result } = renderHook(() => useAudioPlayer('https://a'));
+    act(() => result.current.pause());
+    expect(element().pause).not.toHaveBeenCalled();
   });
 
-  it('should allow setting src on audio element', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
-
-    element.src = 'http://example.com/audio.mp3';
-    expect(element.src).toBe('http://example.com/audio.mp3');
+  it('setVolume writes through to the element', () => {
+    const { result } = renderHook(() => useAudioPlayer('https://a'));
+    act(() => result.current.setVolume(0.3));
+    expect(element().volume).toBe(0.3);
   });
 
-  it('should allow calling play on audio element', async () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
-
-    await element.play();
-    expect(mockAudioElement.play).toHaveBeenCalled();
-  });
-
-  it('should allow calling pause on audio element', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
-
-    element.pause();
-    expect(mockAudioElement.pause).toHaveBeenCalled();
-  });
-
-  it('should allow setting volume on audio element', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
-
-    element.volume = 0.5;
-    expect(element.volume).toBe(0.5);
-  });
-
-  it('should allow adding event listeners', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
-    const listener = vi.fn();
-
-    element.addEventListener('canplaythrough', listener);
-    expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
-      'canplaythrough',
-      listener
-    );
-  });
-
-  it('should allow removing event listeners', () => {
-    const player = GlobalAudioPlayer.getInstance();
-    const element = player.getAudioElement();
-    const listener = vi.fn();
-
-    element.removeEventListener('canplaythrough', listener);
-    expect(mockAudioElement.removeEventListener).toHaveBeenCalledWith(
-      'canplaythrough',
-      listener
-    );
-  });
-
-  it('should persist across multiple getInstance calls', () => {
-    const player1 = GlobalAudioPlayer.getInstance();
-    const element1 = player1.getAudioElement();
-    element1.src = 'http://example.com/audio.mp3';
-    element1.volume = 0.7;
-
-    const player2 = GlobalAudioPlayer.getInstance();
-    const element2 = player2.getAudioElement();
-
-    expect(element2.src).toBe('http://example.com/audio.mp3');
-    expect(element2.volume).toBe(0.7);
+  it('switches source when the url changes', () => {
+    const { rerender } = renderHook(({ url }) => useAudioPlayer(url), {
+      initialProps: { url: 'https://a' }
+    });
+    rerender({ url: 'https://b' });
+    expect(element().src).toBe('https://b');
   });
 });

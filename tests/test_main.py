@@ -1,357 +1,530 @@
-import pytest
-import asyncio
+"""Backend tests for main.Plugin."""
+import base64
+import json
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-import os
 
-sys.modules['decky'] = MagicMock()
+import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-class TestYtDlpIntegration:
-    """Test yt-dlp integration and subprocess handling."""
-    
-    @pytest.mark.asyncio
-    async def test_ytdlp_command_includes_no_window_flag_on_windows(self):
-        """Test that yt-dlp subprocess creation includes CREATE_NO_WINDOW flag on Windows."""
-        with patch('sys.platform', 'win32'):
-            with patch('asyncio.create_subprocess_exec') as mock_exec:
-                import subprocess
-                mock_process = AsyncMock()
-                mock_process.communicate = AsyncMock(return_value=(b'', b''))
-                mock_process.returncode = 0
-                mock_exec.return_value = mock_process
-                
-                await asyncio.create_subprocess_exec(
-                    'yt-dlp', '--version',
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-                )
-                
-                assert mock_exec.called
-                if sys.platform == 'win32':
-                    call_kwargs = mock_exec.call_args[1]
-                    assert 'creationflags' in call_kwargs
+import main
+from conftest import FakeProcess, FakeResponse
 
 
-class TestAudioPlayerState:
-    """Test audio player state management."""
-    
-    def test_audio_player_singleton_pattern(self):
-        """Test that GlobalAudioPlayer follows singleton pattern."""
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        class TestSingleton:
-            _instance = None
-            
-            @classmethod
-            def getInstance(cls):
-                if cls._instance is None:
-                    cls._instance = TestSingleton()
-                return cls._instance
-        
-        instance1 = TestSingleton.getInstance()
-        instance2 = TestSingleton.getInstance()
-        
-        
-        assert instance1 is instance2
-        assert TestSingleton._instance is not None
-        
-        
-        instance3 = TestSingleton.getInstance()
-        assert instance3 is instance1 
+def write(path: Path, data: bytes = b"audio") -> Path:
+    path.write_bytes(data)
+    return path
 
 
-class TestGameStateTracking:
-    """Test game state tracking and audio control."""
-    
-    def test_audio_pauses_when_game_launches(self):
-        """Test that audio player pauses when gamesRunning > 0."""
-        
-        mock_audio = MagicMock()
-        mock_audio.paused = False
-        
-        
-        games_running = []
-        
-        
-        assert len(games_running) == 0
-        
-        
-        games_running.append({"appId": "12345"})
-        
-        
-        assert len(games_running) > 0
-        
-        
-        if len(games_running) > 0:
-            mock_audio.pause()
-        
-        
-        mock_audio.pause.assert_called_once()
-        
-    def test_audio_resumes_when_game_exits(self):
-        """Test that audio player can resume after game exits."""
-        
-        mock_audio = MagicMock()
-        mock_audio.paused = True
-        mock_audio.play = MagicMock(return_value=asyncio.Future())
-        mock_audio.play.return_value.set_result(None)
-        
-        
-        games_running = [{"appId": "12345"}]
-        
-        
-        assert len(games_running) > 0
-        assert mock_audio.paused is True
-        
-        
-        games_running.clear()
-        
-        
-        assert len(games_running) == 0
-        
-        
-        
-        
-        
-        
-        assert hasattr(mock_audio, 'play')
-        assert callable(mock_audio.play)
+# --------------------------------------------------------------------------- #
+# Lifecycle & settings
+# --------------------------------------------------------------------------- #
 
 
-class TestContextMenuPatch:
-    """Test context menu patching."""
-    
-    def test_symbol_handling_in_webpack_modules(self):
-        """Test that Symbol values are properly handled during webpack module scanning."""
-        
-        
-        
-        
-        class JSSymbol:
-            def __init__(self, description):
-                self.description = description
-            
-            def __repr__(self):
-                return f'Symbol({self.description})'
-            
-            def __hash__(self):
-                return hash(id(self))
-        
-        
-        symbol_key1 = JSSymbol('react.element')
-        symbol_key2 = JSSymbol('react.fragment')
-        
-        mock_module = {
-            'default': lambda: None,
-            'someFunction': lambda: None,
-            symbol_key1: True,  
-            symbol_key2: True,
-            '__esModule': True
+class TestLifecycle:
+    async def test_main_creates_dirs_and_survives_update_failure(
+        self, plugin, tmp_path, monkeypatch
+    ):
+        plugin.music_path = str(tmp_path / "new_music")
+        plugin.cache_path = str(tmp_path / "new_cache")
+
+        async def boom():
+            raise RuntimeError("offline")
+
+        monkeypatch.setattr(plugin, "check_and_update_ytdlp", boom)
+        await plugin._main()
+
+        assert Path(plugin.music_path).is_dir()
+        assert Path(plugin.cache_path).is_dir()
+        assert plugin.settings is not None
+
+    async def test_unload_without_process(self, plugin):
+        await plugin._unload()
+
+    async def test_unload_terminates_running_process(self, plugin):
+        proc = FakeProcess()
+        plugin.yt_process = proc
+        await plugin._unload()
+        assert proc.terminated
+
+    async def test_settings_roundtrip(self, plugin):
+        assert await plugin.get_setting("settings", {"volume": 1}) == {"volume": 1}
+        await plugin.set_setting("settings", {"volume": 0.5})
+        assert await plugin.get_setting("settings", None) == {"volume": 0.5}
+
+
+# --------------------------------------------------------------------------- #
+# yt-dlp binary management
+# --------------------------------------------------------------------------- #
+
+
+class TestYtDlpBinary:
+    def test_path_windows(self, plugin):
+        plugin.is_windows = True
+        assert plugin._get_ytdlp_path().endswith("yt-dlp.exe")
+
+    def test_path_linux(self, plugin):
+        plugin.is_windows = False
+        path = plugin._get_ytdlp_path()
+        assert path.endswith("yt-dlp") and not path.endswith(".exe")
+
+    def test_env_linux_sets_ld_library_path(self, plugin):
+        plugin.is_windows = False
+        assert "LD_LIBRARY_PATH" in plugin._get_env()
+
+    def test_env_windows_is_plain_copy(self, plugin, monkeypatch):
+        monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+        plugin.is_windows = True
+        assert "LD_LIBRARY_PATH" not in plugin._get_env()
+
+    @pytest.mark.parametrize(
+        "system,machine,expected",
+        [
+            ("Windows", "AMD64", "yt-dlp.exe"),
+            ("Linux", "x86_64", "yt-dlp_linux"),
+            ("Linux", "aarch64", "yt-dlp_linux_aarch64"),
+            ("Linux", "armv7l", "yt-dlp_linux_armv7l"),
+            ("Darwin", "arm64", "yt-dlp_macos"),
+            ("Darwin", "x86_64", "yt-dlp_macos"),
+            ("Plan9", "mips", "yt-dlp_linux"),
+        ],
+    )
+    def test_asset_name(self, plugin, monkeypatch, system, machine, expected):
+        monkeypatch.setattr(main.platform, "system", lambda: system)
+        monkeypatch.setattr(main.platform, "machine", lambda: machine)
+        assert plugin._get_ytdlp_asset_name() == expected
+
+    async def test_version_missing_binary(self, plugin):
+        assert await plugin.get_ytdlp_version() is None
+
+    async def test_version_reads_stdout(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        fake_exec.next = FakeProcess(stdout=b"2025.12.08\n")
+        assert await plugin.get_ytdlp_version() == "2025.12.08"
+        assert fake_exec.calls[0]["args"][1] == "--version"
+
+    async def test_version_nonzero_exit(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        fake_exec.next = FakeProcess(stdout=b"x", returncode=1)
+        assert await plugin.get_ytdlp_version() is None
+
+    async def test_latest_release(self, plugin, fake_http):
+        fake_http.routes["https://api.github.com/"] = FakeResponse(
+            json_data={"tag_name": "2026.01.01", "assets": [{"name": "a"}]}
+        )
+        rel = await plugin.get_latest_ytdlp_release()
+        assert rel == {"version": "2026.01.01", "assets": [{"name": "a"}]}
+
+    async def test_latest_release_http_error(self, plugin, fake_http):
+        fake_http.routes["https://api.github.com/"] = FakeResponse(status=403)
+        assert await plugin.get_latest_ytdlp_release() is None
+
+    async def test_download_binary_replaces_existing(self, plugin, fake_http):
+        target = write(Path(plugin._get_ytdlp_path()), b"old")
+        fake_http.routes["https://dl/"] = FakeResponse(b"new-binary")
+        assert await plugin.download_ytdlp_binary("https://dl/yt-dlp") is True
+        assert target.read_bytes() == b"new-binary"
+        assert not target.with_suffix(".tmp").exists()
+
+    async def test_download_binary_failure_keeps_existing(self, plugin, fake_http):
+        target = write(Path(plugin._get_ytdlp_path()), b"old")
+        fake_http.routes["https://dl/"] = FakeResponse(status=500)
+        assert await plugin.download_ytdlp_binary("https://dl/yt-dlp") is False
+        assert target.read_bytes() == b"old"
+        assert not target.with_suffix(".tmp").exists()
+
+    async def test_update_skipped_when_up_to_date(self, plugin, monkeypatch):
+        async def ver():
+            return "2026.01.01"
+
+        async def rel():
+            return {"version": "2026.01.01", "assets": []}
+
+        monkeypatch.setattr(plugin, "get_ytdlp_version", ver)
+        monkeypatch.setattr(plugin, "get_latest_ytdlp_release", rel)
+        assert await plugin.check_and_update_ytdlp() is False
+
+    async def test_update_no_release_info(self, plugin, monkeypatch):
+        async def ver():
+            return "2025.01.01"
+
+        async def rel():
+            return None
+
+        monkeypatch.setattr(plugin, "get_ytdlp_version", ver)
+        monkeypatch.setattr(plugin, "get_latest_ytdlp_release", rel)
+        assert await plugin.check_and_update_ytdlp() is False
+
+    async def test_update_downloads_matching_asset(self, plugin, monkeypatch):
+        downloaded = []
+
+        async def ver():
+            return "2025.01.01"
+
+        async def rel():
+            return {
+                "version": "2026.01.01",
+                "assets": [
+                    {"name": "other", "browser_download_url": "https://x/other"},
+                    {"name": "wanted", "browser_download_url": "https://x/wanted"},
+                ],
+            }
+
+        async def dl(url):
+            downloaded.append(url)
+            return True
+
+        monkeypatch.setattr(plugin, "get_ytdlp_version", ver)
+        monkeypatch.setattr(plugin, "get_latest_ytdlp_release", rel)
+        monkeypatch.setattr(plugin, "_get_ytdlp_asset_name", lambda: "wanted")
+        monkeypatch.setattr(plugin, "download_ytdlp_binary", dl)
+        assert await plugin.check_and_update_ytdlp() is True
+        assert downloaded == ["https://x/wanted"]
+
+    async def test_update_missing_asset(self, plugin, monkeypatch):
+        async def ver():
+            return None
+
+        async def rel():
+            return {"version": "2026.01.01", "assets": []}
+
+        monkeypatch.setattr(plugin, "get_ytdlp_version", ver)
+        monkeypatch.setattr(plugin, "get_latest_ytdlp_release", rel)
+        assert await plugin.check_and_update_ytdlp() is False
+
+
+# --------------------------------------------------------------------------- #
+# YouTube search / streaming / download
+# --------------------------------------------------------------------------- #
+
+
+def yt_entry(i):
+    return {
+        "url": f"https://audio/{i}",
+        "title": f"Song {i}",
+        "id": f"vid{i}",
+        "thumbnail": f"https://thumb/{i}",
+        "extra": "ignored",
+    }
+
+
+class TestYouTube:
+    def test_entry_to_info(self):
+        assert main.Plugin.entry_to_info(yt_entry(1)) == {
+            "url": "https://audio/1",
+            "title": "Song 1",
+            "id": "vid1",
+            "thumbnail": "https://thumb/1",
         }
-        
-        
-        
-        
-        
-        safe_props = []
-        for prop in mock_module:
-            
-            if isinstance(prop, str) and callable(mock_module[prop]):
-                safe_props.append(prop)
-        
-        
-        assert 'default' in safe_props
-        assert 'someFunction' in safe_props
-        
-        assert len(safe_props) == 2  
-        
-    def test_function_check_before_tostring(self):
-        """Test that typeof checks are performed before calling toString."""
-        
-        
-        
-        class JSSymbol:
-            def __init__(self, name):
-                self.name = name
-        
-        symbol_key = JSSymbol('symbol_key')
-        
-        test_object = {
-            'validFunction': lambda x: x,
-            'anotherFunction': print,
-            symbol_key: 'symbol_value',  
-            'normalProp': 'string'
+
+    async def test_search_without_binary_does_nothing(self, plugin, fake_exec):
+        await plugin.search_yt("zelda")
+        assert fake_exec.calls == []
+        assert await plugin.next_yt_result() is None
+
+    async def test_search_streams_results(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        lines = b"".join(json.dumps(yt_entry(i)).encode() + b"\n" for i in range(3))
+        fake_exec.next = FakeProcess(stdout=lines)
+
+        await plugin.search_yt("zelda")
+        args = fake_exec.calls[0]["args"]
+        assert any(str(a).startswith("ytsearch") and "zelda" in str(a) for a in args)
+
+        results = []
+        while (r := await plugin.next_yt_result()) is not None:
+            results.append(r)
+        assert [r["id"] for r in results] == ["vid0", "vid1", "vid2"]
+
+    async def test_new_search_terminates_previous(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        first = FakeProcess(stdout=b"")
+        fake_exec.next = first
+        await plugin.search_yt("a")
+        fake_exec.next = FakeProcess(stdout=b"")
+        await plugin.search_yt("b")
+        assert first.terminated
+
+    async def test_next_result_ignores_bad_json(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        fake_exec.next = FakeProcess(stdout=b"not json\n")
+        await plugin.search_yt("x")
+        assert await plugin.next_yt_result() is None
+
+    async def test_single_url_prefers_local_file(self, plugin, fake_exec):
+        write(Path(plugin.music_path) / "abc.webm", b"hello")
+        url = await plugin.single_yt_url("abc")
+        assert url.startswith("data:audio/")
+        assert base64.b64decode(url.split(",", 1)[1]) == b"hello"
+        assert fake_exec.calls == []
+
+    async def test_single_url_from_ytdlp(self, plugin, fake_exec):
+        fake_exec.next = FakeProcess(stdout=json.dumps(yt_entry(7)).encode())
+        assert await plugin.single_yt_url("vid7") == "https://audio/7"
+
+    async def test_single_url_no_output(self, plugin, fake_exec):
+        fake_exec.next = FakeProcess(stdout=b"")
+        assert await plugin.single_yt_url("vid7") is None
+
+    async def test_download_skips_existing(self, plugin, fake_exec):
+        write(Path(plugin.music_path) / "abc.webm")
+        await plugin.download_yt_audio("abc")
+        assert fake_exec.calls == []
+
+    async def test_download_invokes_ytdlp(self, plugin, fake_exec):
+        fake_exec.next = FakeProcess(returncode=0)
+        await plugin.download_yt_audio("abc")
+        args = fake_exec.calls[0]["args"]
+        assert "abc" in args
+        assert plugin.music_path in args
+
+
+# --------------------------------------------------------------------------- #
+# Direct URL / iTunes
+# --------------------------------------------------------------------------- #
+
+
+class TestDirectDownloads:
+    async def test_download_url_uses_path_extension(self, plugin, fake_http):
+        fake_http.routes["https://cdn/"] = FakeResponse(b"mp3data")
+        await plugin.download_url("https://cdn/track.mp3", "khi_1")
+        assert (Path(plugin.music_path) / "khi_1.mp3").read_bytes() == b"mp3data"
+
+    @pytest.mark.parametrize(
+        "ctype,ext",
+        [("audio/mpeg", "mp3"), ("audio/ogg", "ogg"), ("audio/wav", "wav"),
+         ("application/octet-stream", "webm")],
+    )
+    async def test_download_url_content_type_fallback(
+        self, plugin, fake_http, ctype, ext
+    ):
+        fake_http.routes["https://cdn/"] = FakeResponse(
+            b"x", headers={"content-type": ctype}
+        )
+        await plugin.download_url("https://cdn/stream", "id1")
+        assert (Path(plugin.music_path) / f"id1.{ext}").exists()
+
+    async def test_download_url_http_error_raises(self, plugin, fake_http):
+        fake_http.routes["https://cdn/"] = FakeResponse(status=404)
+        with pytest.raises(Exception):
+            await plugin.download_url("https://cdn/track.mp3", "id1")
+
+    async def test_download_url_delegates_itunes(self, plugin, monkeypatch):
+        seen = []
+
+        async def fake_itunes(track_id):
+            seen.append(track_id)
+
+        monkeypatch.setattr(plugin, "download_itunes", fake_itunes)
+        await plugin.download_url("https://ignored", "itunes_123")
+        assert seen == ["itunes_123"]
+
+    async def test_download_itunes(self, plugin, fake_http):
+        fake_http.routes["https://itunes.apple.com/lookup"] = FakeResponse(
+            json_data={"results": [{"previewUrl": "https://audio.itunes/p.m4a"}]}
+        )
+        fake_http.routes["https://audio.itunes/"] = FakeResponse(b"m4a")
+        await plugin.download_itunes("itunes_42")
+        assert (Path(plugin.music_path) / "itunes_42.m4a").read_bytes() == b"m4a"
+
+    async def test_download_itunes_no_results(self, plugin, fake_http):
+        fake_http.routes["https://itunes.apple.com/lookup"] = FakeResponse(
+            json_data={"results": []}
+        )
+        await plugin.download_itunes("42")
+        assert list(Path(plugin.music_path).iterdir()) == []
+
+    async def test_download_itunes_preview_failure_cleans_up(self, plugin, fake_http):
+        fake_http.routes["https://itunes.apple.com/lookup"] = FakeResponse(
+            json_data={"results": [{"previewUrl": "https://audio.itunes/p.m4a"}]}
+        )
+        fake_http.routes["https://audio.itunes/"] = FakeResponse(status=500)
+        await plugin.download_itunes("42")
+        assert list(Path(plugin.music_path).iterdir()) == []
+
+    async def test_search_itunes_maps_results(self, plugin, fake_http):
+        fake_http.routes["https://itunes.apple.com/search"] = FakeResponse(
+            json_data={
+                "results": [
+                    {
+                        "trackId": 1,
+                        "trackName": "Theme",
+                        "artistName": "Composer",
+                        "previewUrl": "https://p/1.m4a",
+                        "artworkUrl100": "https://art/100x100bb.jpg",
+                        "collectionName": "OST",
+                        "trackTimeMillis": 90500,
+                    }
+                ]
+            }
+        )
+        results = await plugin.search_itunes("zelda", 5)
+        assert results == [
+            {
+                "id": "itunes_1",
+                "title": "Theme - Composer",
+                "url": "https://p/1.m4a",
+                "thumbnail": "https://art/600x600bb.jpg",
+                "artist": "Composer",
+                "album": "OST",
+                "duration": 90,
+            }
+        ]
+        assert fake_http.calls[0]["params"]["limit"] == 5
+
+    async def test_search_itunes_error_returns_empty(self, plugin, fake_http):
+        fake_http.routes["https://itunes.apple.com/search"] = FakeResponse(status=503)
+        assert await plugin.search_itunes("zelda") == []
+
+
+# --------------------------------------------------------------------------- #
+# Local library
+# --------------------------------------------------------------------------- #
+
+
+class TestLocalLibrary:
+    def test_local_match_none(self, plugin):
+        assert plugin.local_match("missing") is None
+
+    def test_local_match_found(self, plugin):
+        f = write(Path(plugin.music_path) / "song.mp3")
+        assert plugin.local_match("song") == str(f)
+
+    def test_local_match_ignores_directories(self, plugin):
+        (Path(plugin.music_path) / "song.d").mkdir()
+        assert plugin.local_match("song") is None
+
+    async def test_search_local_music_filters_and_limits(self, plugin):
+        music = Path(plugin.music_path)
+        for name in ["Zelda_Theme.mp3", "mario-song.ogg", "notes.txt", "zelda2.flac"]:
+            write(music / name)
+
+        all_results = await plugin.search_local_music("")
+        assert {r["filename"] for r in all_results} == {
+            "Zelda_Theme.mp3", "mario-song.ogg", "zelda2.flac"
         }
-        
-        
-        functions_found = []
-        
-        for key in test_object:
-            value = test_object[key]
-            
-            if callable(value) and isinstance(key, str):
-                
-                functions_found.append(key)
-        
-        
-        assert 'validFunction' in functions_found
-        assert 'anotherFunction' in functions_found
-        assert len(functions_found) == 2
-        
-        
-        assert symbol_key in test_object
-        assert symbol_key not in functions_found
+
+        zelda = await plugin.search_local_music("zelda")
+        assert {r["id"] for r in zelda} == {"local_Zelda_Theme", "local_zelda2"}
+
+        assert len(await plugin.search_local_music("", limit=1)) == 1
+
+    async def test_search_local_music_missing_dir(self, plugin, tmp_path):
+        plugin.music_path = str(tmp_path / "nope")
+        assert await plugin.search_local_music("") == []
+
+    @pytest.mark.parametrize(
+        "ext,mime",
+        [("mp3", "audio/mpeg"), ("m4a", "audio/mp4"), ("webm", "audio/webm"),
+         ("flac", "audio/flac")],
+    )
+    async def test_get_local_music_url_mime(self, plugin, ext, mime):
+        write(Path(plugin.music_path) / f"track.{ext}", b"data")
+        url = await plugin.get_local_music_url("local_track")
+        assert url.startswith(f"data:{mime};base64,")
+        assert base64.b64decode(url.split(",", 1)[1]) == b"data"
+
+    async def test_get_local_music_url_missing(self, plugin):
+        assert await plugin.get_local_music_url("local_nothing") is None
+
+    async def test_save_local_music_copies(self, plugin, tmp_path):
+        src = write(tmp_path / "My Song.mp3", b"abc")
+        new_id = await plugin.save_local_music(str(src))
+        assert new_id == "local_My Song"
+        assert (Path(plugin.music_path) / "My Song.mp3").read_bytes() == b"abc"
+
+    async def test_save_local_music_sanitizes_custom_name(self, plugin, tmp_path):
+        src = write(tmp_path / "a.ogg")
+        new_id = await plugin.save_local_music(str(src), "../../evil name!")
+        assert new_id == "local_evil_name"
+        assert (Path(plugin.music_path) / "evil_name.ogg").exists()
+
+    async def test_save_local_music_rejects_bad_input(self, plugin, tmp_path):
+        assert await plugin.save_local_music(str(tmp_path / "missing.mp3")) is None
+        assert await plugin.save_local_music(str(tmp_path)) is None
+        exe = write(tmp_path / "virus.exe")
+        assert await plugin.save_local_music(str(exe)) is None
+
+    async def test_save_local_music_existing_returns_id(self, plugin, tmp_path):
+        write(Path(plugin.music_path) / "dup.mp3", b"old")
+        src = write(tmp_path / "dup.mp3", b"new")
+        assert await plugin.save_local_music(str(src)) == "local_dup"
+        assert (Path(plugin.music_path) / "dup.mp3").read_bytes() == b"old"
+
+    async def test_delete_local_music(self, plugin):
+        f = write(Path(plugin.music_path) / "bye.mp3")
+        assert await plugin.delete_local_music("local_bye") is True
+        assert not f.exists()
+        assert await plugin.delete_local_music("local_bye") is False
+
+    async def test_clear_downloads(self, plugin):
+        music = Path(plugin.music_path)
+        write(music / "a.mp3")
+        write(music / "b.webm")
+        await plugin.clear_downloads()
+        assert list(music.iterdir()) == []
+
+    async def test_import_local_music(self, plugin, tmp_path):
+        src = write(tmp_path / "in.flac", b"flac")
+        assert await plugin.import_local_music(str(src), "imported") is True
+        assert (Path(plugin.music_path) / "imported.flac").read_bytes() == b"flac"
+        assert await plugin.import_local_music(str(tmp_path / "x.mp3"), "y") is False
 
 
-class TestFileOperations:
-    """Test file operations and directory management."""
-    
-    @pytest.mark.asyncio
-    async def test_theme_directory_creation(self, tmp_path):
-        """Test that theme directories are created properly."""
-        theme_dir = tmp_path / "themes"
-        theme_dir.mkdir()
-        
-        assert theme_dir.exists()
-        assert theme_dir.is_dir()
-    
-    @pytest.mark.asyncio
-    async def test_theme_file_storage(self, tmp_path):
-        """Test that theme files are stored with correct structure."""
-        theme_dir = tmp_path / "themes" / "12345"
-        theme_dir.mkdir(parents=True)
-        
-        theme_file = theme_dir / "theme.mp3"
-        theme_file.write_text("mock audio content")
-        
-        assert theme_file.exists()
-        assert theme_file.is_file()
+# --------------------------------------------------------------------------- #
+# Directory browsing
+# --------------------------------------------------------------------------- #
 
 
-class TestConfigurationManagement:
-    """Test configuration and settings management."""
-    
-    def test_settings_structure(self):
-        """Test that settings follow expected structure."""
-        settings = {
-            "volume": 0.5,
-            "autoPlay": True,
-            "customThemes": {}
-        }
-        
-        assert "volume" in settings
-        assert isinstance(settings["volume"], (int, float))
-        assert 0 <= settings["volume"] <= 1
-    
-    def test_theme_metadata_structure(self):
-        """Test that theme metadata follows expected structure."""
-        metadata = {
-            "gameId": "12345",
-            "themeName": "Custom Theme",
-            "url": "http://example.com/theme.mp3",
-            "localPath": "/path/to/theme.mp3"
-        }
-        
-        assert "gameId" in metadata
-        assert "themeName" in metadata
-        assert isinstance(metadata["gameId"], str)
+class TestListDirectory:
+    async def test_linux_denies_outside_allowed_roots(self, plugin, monkeypatch):
+        monkeypatch.setattr(main.platform, "system", lambda: "Linux")
+        res = await plugin.list_directory("/etc")
+        assert res["error"] == "Access denied"
+        assert res["entries"] == []
+
+    async def test_windows_denies_unc_paths(self, plugin, monkeypatch):
+        monkeypatch.setattr(main.platform, "system", lambda: "Windows")
+        res = await plugin.list_directory(r"\\server\share")
+        assert res["error"] == "Access denied"
+
+    async def test_lists_entries(self, plugin, tmp_path, monkeypatch):
+        (tmp_path / "sub").mkdir()
+        write(tmp_path / "file.mp3")
+        if sys.platform != "win32" and not str(tmp_path).startswith("/home"):
+            pytest.skip("tmp_path is outside the allowed browse roots on this host")
+        res = await plugin.list_directory(str(tmp_path))
+        names = {(e["name"], e["is_directory"]) for e in res["entries"]}
+        assert ("sub", True) in names
+        assert ("file.mp3", False) in names
+
+    async def test_missing_directory(self, plugin, tmp_path):
+        if sys.platform == "win32":
+            missing = str(tmp_path / "missing")
+        else:
+            missing = "/home/definitely/not/here"
+        res = await plugin.list_directory(missing)
+        assert res["error"] == "Directory does not exist"
 
 
-class TestErrorHandling:
-    """Test error handling and edge cases."""
-    
-    @pytest.mark.asyncio
-    async def test_missing_audio_file_handling(self):
-        """Test handling of missing audio files."""
-        from pathlib import Path
-        
-        fake_path = Path("/nonexistent/audio.mp3")
-        assert not fake_path.exists()
-    
-    @pytest.mark.asyncio
-    async def test_invalid_url_handling(self):
-        """Test handling of invalid URLs."""
-        invalid_urls = [
-            "",
-            "not-a-url",
-            "http://",
-            "ftp://invalid.com"
-        ]
-        
-        for url in invalid_urls:
-            assert not url.startswith("https://") or len(url) < 10
+# --------------------------------------------------------------------------- #
+# Cache backups
+# --------------------------------------------------------------------------- #
 
 
-class TestUtilityFunctions:
-    """Test utility functions and helpers."""
-    
-    def test_path_sanitization(self):
-        """Test that file paths are properly sanitized."""
-        unsafe_names = [
-            "../../../etc/passwd",
-            "C:\\Windows\\System32",
-            "file:///etc/passwd"
-        ]
-        
-        for name in unsafe_names:
-            assert ".." not in Path(name).name or not Path(name).is_absolute()
-    
-    def test_url_validation(self):
-        """Test URL validation logic."""
-        valid_urls = [
-            "https://example.com/audio.mp3",
-            "https://youtube.com/watch?v=12345"
-        ]
-        
-        invalid_urls = [
-            "javascript:alert(1)",
-            "data:text/html,<script>alert(1)</script>",
-            "file:///etc/passwd"
-        ]
-        
-        for url in valid_urls:
-            assert url.startswith("http://") or url.startswith("https://")
-        
-        for url in invalid_urls:
-            assert not (url.startswith("http://") or url.startswith("https://"))
+class TestCacheBackups:
+    async def test_export_list_import_clear(self, plugin):
+        cache = {"123": {"videoId": "abc", "volume": 0.5}}
+        await plugin.export_cache(cache)
 
+        backups = await plugin.list_cache_backups()
+        assert len(backups) == 1
+        assert backups[0].startswith("backup-")
 
-@pytest.mark.asyncio
-async def test_async_operation_cleanup():
-    """Test that async operations are properly cleaned up."""
-    tasks = []
-    
-    async def sample_task():
-        await asyncio.sleep(0.01)
-    
-    task = asyncio.create_task(sample_task())
-    tasks.append(task)
-    
-    await asyncio.gather(*tasks)
-    
-    assert task.done()
-    assert not task.cancelled()
+        assert await plugin.import_cache(backups[0]) == cache
 
+        assert await plugin.clear_cache() == 1
+        assert await plugin.list_cache_backups() == []
 
-def test_platform_compatibility():
-    """Test platform-specific code paths."""
-    import platform
-    
-    current_platform = platform.system()
-    assert current_platform in ['Windows', 'Linux', 'Darwin']
-    
-    if current_platform == 'Windows':
-        import subprocess
-        assert hasattr(subprocess, 'CREATE_NO_WINDOW')
+    async def test_import_missing_raises(self, plugin):
+        with pytest.raises(Exception):
+            await plugin.import_cache("does-not-exist")
