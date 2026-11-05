@@ -40,37 +40,82 @@ abstract class AudioResolver {
   }
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 function isYouTubeUrl(url: string) {
   return url.includes('youtube.com') || url.includes('youtu.be');
 }
 
+export function isSoundCloudUrl(url: string) {
+  const host = hostOf(url);
+  return host === 'soundcloud.com' || host.endsWith('.soundcloud.com');
+}
+
+/** A web page (not a playable file) that yt-dlp has to resolve. */
+function isYtDlpPage(url: string) {
+  return isYouTubeUrl(url) || isSoundCloudUrl(url);
+}
+
+type YtDlpSource = 'youtube' | 'soundcloud';
+
+/** YouTube and SoundCloud, both searched and resolved through yt-dlp. */
 export class YtDlpAudioResolver extends AudioResolver {
+  constructor(private readonly source: YtDlpSource = 'youtube') {
+    super();
+  }
+
   async *getSearchResults(
     searchTerm: string
   ): AsyncIterable<MediaContentPreview> {
+    let searchId: string | null | undefined;
     try {
-      await call<[string]>('search_yt', searchTerm);
-      let result = await call<[], MediaContentPreview | null>('next_yt_result');
+      searchId = await call<[string, string], string | null>(
+        'search_yt',
+        searchTerm,
+        this.source
+      );
+      if (!searchId) return;
+      let result = await call<[string], MediaContentPreview | null>(
+        'next_yt_result',
+        searchId
+      );
       while (result) {
         yield result;
-        result = await call<[], MediaContentPreview | null>('next_yt_result');
+        result = await call<[string], MediaContentPreview | null>(
+          'next_yt_result',
+          searchId
+        );
       }
-      return;
     } catch (err) {
       console.error('YtDlp search error:', err);
+    } finally {
+      // Also runs when the consumer stops early, so no yt-dlp process is
+      // left running behind a search nobody reads.
+      if (searchId) {
+        call<[string]>('close_search', searchId).catch(() => {});
+      }
     }
-    return;
   }
 
   async getAudioUrlFromVideo(video: MediaContent): Promise<string | undefined> {
-    if (video.url && !isYouTubeUrl(video.url)) {
+    if (video.url && !isYtDlpPage(video.url)) {
       return video.url;
-    } else {
+    }
+    try {
       const result = await call<[string], string | null>(
         'single_yt_url',
         video.id
       );
       return result || undefined;
+    } catch (e) {
+      console.error('YtDlp resolve error:', e);
+      return undefined;
     }
   }
 
@@ -85,7 +130,7 @@ export class YtDlpAudioResolver extends AudioResolver {
   }
 }
 
-interface ITunesResult {
+interface PreviewResult {
   id: string;
   title: string;
   url: string;
@@ -95,13 +140,21 @@ interface ITunesResult {
   duration: number;
 }
 
-export class ITunesAudioResolver extends AudioResolver {
+/** Streaming services that only expose short preview clips. */
+class PreviewAudioResolver extends AudioResolver {
+  constructor(
+    private readonly searchMethod: string,
+    private readonly label: string
+  ) {
+    super();
+  }
+
   async *getSearchResults(
     searchTerm: string
   ): AsyncIterable<MediaContentPreview> {
     try {
-      const results = await call<[string, number], ITunesResult[]>(
-        'search_itunes',
+      const results = await call<[string, number], PreviewResult[]>(
+        this.searchMethod,
         searchTerm,
         10
       );
@@ -117,7 +170,7 @@ export class ITunesAudioResolver extends AudioResolver {
         }
       }
     } catch (err) {
-      console.error('iTunes search error:', err);
+      console.error(`${this.label} search error:`, err);
     }
     return;
   }
@@ -133,7 +186,7 @@ export class ITunesAudioResolver extends AudioResolver {
       );
       return url || undefined;
     } catch (e) {
-      console.error('iTunes local music URL error:', e);
+      console.error(`${this.label} local music URL error:`, e);
       return undefined;
     }
   }
@@ -143,9 +196,21 @@ export class ITunesAudioResolver extends AudioResolver {
       await call<[string, string]>('download_url', video.url ?? '', video.id);
       return true;
     } catch (e) {
-      console.error('iTunes download error:', e);
+      console.error(`${this.label} download error:`, e);
       return false;
     }
+  }
+}
+
+export class ITunesAudioResolver extends PreviewAudioResolver {
+  constructor() {
+    super('search_itunes', 'iTunes');
+  }
+}
+
+export class DeezerAudioResolver extends PreviewAudioResolver {
+  constructor() {
+    super('search_deezer', 'Deezer');
   }
 }
 
@@ -357,7 +422,9 @@ export class KhinsiderAudioResolver extends AudioResolver {
       const audioSrc =
         audio?.getAttribute('src') ||
         audio?.querySelector('source')?.getAttribute('src');
-      if (audioSrc) return audioSrc;
+      if (audioSrc) {
+        return audioSrc.startsWith('data:') ? audioSrc : khinsiderUrl(audioSrc);
+      }
 
       const downloadLink = doc
         .querySelector('a .songDownloadLink')
@@ -396,18 +463,41 @@ export class KhinsiderAudioResolver extends AudioResolver {
   }
 }
 
-export type AudioProvider = 'ytdlp' | 'itunes' | 'local' | 'khinsider';
+export type AudioProvider =
+  | 'ytdlp'
+  | 'soundcloud'
+  | 'itunes'
+  | 'deezer'
+  | 'khinsider'
+  | 'local';
 
+/** Source tabs, in display order. */
 export const SEARCH_PROVIDERS: AudioProvider[] = [
   'ytdlp',
+  'soundcloud',
   'itunes',
+  'deezer',
   'khinsider',
   'local'
 ];
 
+/**
+ * Order in which sources are tried when a game's music is picked
+ * automatically: YouTube first, the rest only as fallbacks.
+ */
+export const AUTO_PROVIDERS: AudioProvider[] = [
+  'ytdlp',
+  'khinsider',
+  'soundcloud',
+  'deezer',
+  'itunes'
+];
+
 export function getProviderFromId(videoId: string): AudioProvider {
   if (videoId.startsWith('itunes_')) return 'itunes';
+  if (videoId.startsWith('deezer_')) return 'deezer';
   if (videoId.startsWith('local_')) return 'local';
+  if (isSoundCloudUrl(videoId)) return 'soundcloud';
   if (/^https?:\/\//.test(videoId) && !isYouTubeUrl(videoId)) {
     return 'khinsider';
   }
@@ -418,16 +508,48 @@ export function getResolver(provider: AudioProvider): AudioResolver {
   switch (provider) {
     case 'itunes':
       return new ITunesAudioResolver();
+    case 'deezer':
+      return new DeezerAudioResolver();
     case 'local':
       return new LocalMusicAudioResolver();
     case 'khinsider':
       return new KhinsiderAudioResolver();
+    case 'soundcloud':
+      return new YtDlpAudioResolver('soundcloud');
     case 'ytdlp':
     default:
-      return new YtDlpAudioResolver();
+      return new YtDlpAudioResolver('youtube');
   }
 }
 
 export function getResolverForVideoId(videoId: string): AudioResolver {
   return getResolver(getProviderFromId(videoId));
+}
+
+export type AutoAudio = {
+  videoId: string;
+  audioUrl: string;
+  provider: AudioProvider;
+};
+
+/**
+ * Pick a theme for a game: the first playable result of the first source
+ * that has one. With `fallback` off only the first source (YouTube) is used.
+ */
+export async function findAutoAudio(
+  appName: string,
+  options: { fallback?: boolean; isCancelled?: () => boolean } = {}
+): Promise<AutoAudio | undefined> {
+  const { fallback = true, isCancelled = () => false } = options;
+  const providers = fallback ? AUTO_PROVIDERS : AUTO_PROVIDERS.slice(0, 1);
+  for (const provider of providers) {
+    if (isCancelled()) return undefined;
+    try {
+      const found = await getResolver(provider).getAudio(appName, isCancelled);
+      if (found?.audioUrl.length) return { ...found, provider };
+    } catch (e) {
+      console.error(`[GameThemeMusic] ${provider} auto search failed`, e);
+    }
+  }
+  return undefined;
 }

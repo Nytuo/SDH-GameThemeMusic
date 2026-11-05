@@ -9,89 +9,113 @@ import {
   TextField
 } from '@decky/ui';
 import { useState } from 'react';
+import useTranslations from '../../hooks/useTranslations';
 import FileBrowser from './fileBrowser';
 
-const SuccessModalContent = ({
+const MessageModalContent = ({
+  title,
   message,
+  closeLabel,
   closeModal
 }: {
+  title: string;
   message: string;
+  closeLabel: string;
   closeModal?: () => void;
 }) => (
   <ModalRoot>
     <div style={{ padding: 24, textAlign: 'center' }}>
-      <h3>Success</h3>
+      <h3>{title}</h3>
       <div style={{ margin: '16px 0' }}>{message}</div>
-      <DialogButton onClick={closeModal}>Close</DialogButton>
+      <DialogButton onClick={closeModal}>{closeLabel}</DialogButton>
     </div>
   </ModalRoot>
 );
 
-function showSuccessModal(message: string) {
-  showModal(<SuccessModalContent message={message} />);
-}
-
 export default function LocalMusicImport({
-  selectNewAudio
+  selectNewAudio,
+  onImported
 }: {
   selectNewAudio?: (audio: {
     title: string;
     videoId: string;
     audioUrl: string;
   }) => Promise<void>;
+  onImported?: () => void;
 }) {
+  const t = useTranslations();
   const [customName, setCustomName] = useState('');
-  const [selectedFile, setSelectedFile] = useState('');
+  const [lastImported, setLastImported] = useState('');
+  const [showBrowser, setShowBrowser] = useState(false);
+
+  function showMessage(title: string, message: string) {
+    showModal(
+      <MessageModalContent
+        title={title}
+        message={message}
+        closeLabel={t('close')}
+      />
+    );
+  }
 
   async function handleFileSelect(filePath: string, fileName: string) {
-    setSelectedFile(fileName);
-    const id = `local_${fileName.replace(/\.[^/.]+$/, '')}`;
-    const importResult = await call<[string, string], boolean>(
-      'import_local_music',
-      filePath,
-      fileName.replace(/\.[^/.]+$/, '')
-    );
-    if (!importResult) {
-      showSuccessModal('Failed to import music file.');
-      return;
-    }
-    if (selectNewAudio) {
-      const res = await call<[string], string | null>(
-        'get_local_music_url',
-        id
+    const baseName = fileName.replace(/\.[^/.]+$/, '');
+    try {
+      // The backend never overwrites: it picks a free name and returns the id.
+      const id = await call<[string, string], string | null>(
+        'import_local_music',
+        filePath,
+        customName.trim()
       );
-      if (res) {
-        await selectNewAudio({
-          title: fileName.replace(/\.[^/.]+$/, ''),
-          videoId: id,
-          audioUrl: res
-        });
-        showSuccessModal('Music imported successfully!');
+      if (!id) {
+        showMessage(t('importFailed'), t('importFailedDetail'));
+        return;
       }
+      setLastImported(customName.trim() || baseName);
+      setCustomName('');
+      onImported?.();
+      if (selectNewAudio) {
+        const url = await call<[string], string | null>(
+          'get_local_music_url',
+          id
+        );
+        if (!url) {
+          showMessage(t('importFailed'), t('importFailedDetail'));
+          return;
+        }
+        await selectNewAudio({
+          title: id.replace(/^local_/, ''),
+          videoId: id,
+          audioUrl: url
+        });
+      }
+      showMessage(t('importSuccess'), t('importSuccessDetail'));
+    } catch (e) {
+      console.error('[GameThemeMusic] Import failed', e);
+      showMessage(t('importFailed'), String(e));
     }
   }
 
-  const [showLocal, setShowLocal] = useState(false);
   return (
     <>
       <DialogButton
         style={{ marginBottom: 12, alignSelf: 'flex-start' }}
-        onClick={() => setShowLocal((v) => !v)}
+        onClick={() => setShowBrowser((v) => !v)}
       >
-        {showLocal ? 'Hide Local Import Panel' : 'Show Local Import Panel'}
+        {showBrowser ? t('hideImportPanel') : t('showImportPanel')}
       </DialogButton>
-      {showLocal && (
-        <PanelSection title="Import Music from Filesystem">
+      {showBrowser && (
+        <PanelSection title={t('importMusic')}>
           <PanelSectionRow>
             <Focusable
               style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
             >
               <TextField
-                label="Custom Name (Optional)"
+                label={t('importCustomName')}
                 value={customName}
                 onChange={(e) => setCustomName(e.target.value)}
               />
-              {selectedFile && (
+              {lastImported && (
                 <div
                   style={{
                     fontSize: '12px',
@@ -101,7 +125,7 @@ export default function LocalMusicImport({
                     borderRadius: '4px'
                   }}
                 >
-                  {`Last imported: ${selectedFile}`}
+                  {t('lastImported', { name: lastImported })}
                 </div>
               )}
             </Focusable>

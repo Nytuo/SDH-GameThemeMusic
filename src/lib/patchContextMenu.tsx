@@ -9,15 +9,24 @@ import {
   Patch
 } from '@decky/ui';
 import useTranslations from '../hooks/useTranslations';
+import { isDesktopUI } from './playbackGuard';
+import { getAppName } from './themeResolver';
+import { openChangeThemeWindow } from './desktopWindows';
 
 function ChangeMusicButton({ appId }: { appId: number }) {
   const t = useTranslations();
+  const open = () => {
+    // The plugin's route only exists in Big Picture.
+    if (isDesktopUI()) openChangeThemeWindow(appId, getAppName(appId));
+    else Navigation.Navigate(`/gamethememusic/${appId}`);
+  };
   return (
     <MenuItem
       key="game-theme-music-change-music"
-      onSelected={() => {
-        Navigation.Navigate(`/gamethememusic/${appId}`);
-      }}
+      // `onSelected` is the gamepad path; the desktop menu is clicked with the
+      // mouse and calls `onClick` instead.
+      onSelected={open}
+      onClick={open}
     >
       {t('changeThemeMusic')}...
     </MenuItem>

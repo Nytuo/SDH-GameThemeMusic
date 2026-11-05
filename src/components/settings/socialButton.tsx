@@ -10,8 +10,25 @@ import { HiQrCode } from 'react-icons/hi2';
 import useTranslations from '../../hooks/useTranslations';
 
 import showQrModal from './showQrModal';
+import { isDesktopUI } from '../../lib/playbackGuard';
 
 const navLink = (url: string) => {
+  // The desktop client has no Big Picture web view to navigate.
+  if (isDesktopUI()) {
+    try {
+      const system = (
+        SteamClient as unknown as {
+          System?: { OpenInSystemBrowser?: (url: string) => void };
+        }
+      ).System;
+      if (system?.OpenInSystemBrowser) {
+        system.OpenInSystemBrowser(url);
+        return;
+      }
+    } catch (e) {
+      console.warn('[GameThemeMusic] Could not open the system browser', e);
+    }
+  }
   Navigation.CloseSideMenus();
   Navigation.NavigateToExternalWeb(url);
 };

@@ -33,4 +33,16 @@ function useTranslations() {
   };
 }
 
+/** Translation outside React (the desktop launcher buttons). */
+export function translate(key: keyof (typeof languages)['en']): string {
+  let lang: keyof typeof languages = 'en';
+  try {
+    lang = getCurrentLanguage();
+  } catch {
+    /* localisation not ready: English */
+  }
+  const own = (languages[lang] as (typeof languages)['en'])?.[key];
+  return own?.length ? own : (languages.en?.[key] ?? key);
+}
+
 export default useTranslations;

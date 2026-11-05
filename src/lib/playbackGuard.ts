@@ -23,6 +23,18 @@ function register(
   return null;
 }
 
+let uiModeDesktop = false;
+let bigPictureClosed = false;
+
+/**
+ * True while Steam shows its desktop client rather than Big Picture / Game
+ * Mode (or Big Picture has no window at all). Only meaningful while a
+ * playback guard is running.
+ */
+export function isDesktopUI(): boolean {
+  return uiModeDesktop || bigPictureClosed;
+}
+
 /** True when the Big Picture window is gone or closed. */
 export function isGamepadUIClosed(): boolean {
   try {
@@ -83,13 +95,21 @@ export function isAudibleVideoPlaying(
   }
 }
 
+export type PlaybackGuardOptions = {
+  /** Keep playing while Steam shows its desktop client (re-read every second). */
+  allowDesktop?: () => boolean;
+};
+
 /**
- * Suspend playback whenever Steam is not showing Big Picture / Game Mode,
- * the device goes to sleep, or a video with sound (the startup movie) plays. Calls `onChange(true)` to suspend and
- * `onChange(false)` to allow playback again. Returns a disposer.
+ * Suspend playback whenever Steam is not showing Big Picture / Game Mode
+ * (unless `allowDesktop` says the desktop client is fine), the device goes to
+ * sleep, or a video with sound (the startup movie) plays. Calls
+ * `onChange(true)` to suspend and `onChange(false)` to allow playback again.
+ * Returns a disposer.
  */
 export function startPlaybackGuard(
-  onChange: (suspended: boolean) => void
+  onChange: (suspended: boolean) => void,
+  options: PlaybackGuardOptions = {}
 ): () => void {
   let desktopMode = false;
   let sleeping = false;
@@ -98,7 +118,13 @@ export function startPlaybackGuard(
   let last: boolean | null = null;
 
   const update = () => {
-    const suspended = desktopMode || sleeping || windowClosed || videoPlaying;
+    uiModeDesktop = desktopMode;
+    bigPictureClosed = windowClosed;
+    const desktopAllowed = options.allowDesktop?.() === true;
+    const suspended =
+      (!desktopAllowed && (desktopMode || windowClosed)) ||
+      sleeping ||
+      videoPlaying;
     if (suspended !== last) {
       last = suspended;
       onChange(suspended);
@@ -176,6 +202,8 @@ export function startPlaybackGuard(
 
   return () => {
     clearInterval(watchdog);
+    uiModeDesktop = false;
+    bigPictureClosed = false;
     unlistenToVideos();
     handles.forEach((h) => {
       try {

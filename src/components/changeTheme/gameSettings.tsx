@@ -2,15 +2,16 @@ import {
   DialogButton,
   Focusable,
   SliderField,
-  PanelSectionRow,
-  useParams
+  PanelSectionRow
 } from '@decky/ui';
+import { useAppId } from '../../hooks/useAppId';
 import { useEffect, useState } from 'react';
 import { getCache, updateCache } from '../../cache/musicCache';
 
 import useTranslations from '../../hooks/useTranslations';
 import { useSettings } from '../../hooks/useSettings';
-import { FaVolumeUp } from 'react-icons/fa';
+import { FaRedo, FaVolumeUp } from 'react-icons/fa';
+import { toaster } from '@decky/api';
 import Spinner from '../spinner';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
 import useThemeMusic, { getAppName } from '../../hooks/useThemeMusic';
@@ -18,8 +19,7 @@ import useThemeMusic, { getAppName } from '../../hooks/useThemeMusic';
 export default function GameSettings() {
   const t = useTranslations();
   const { settings, isLoading: settingsIsLoading } = useSettings();
-  const { appid } = useParams<{ appid: string }>();
-  const appId = parseInt(appid);
+  const appId = useAppId();
   const appName = getAppName(appId);
 
   const { audio, isLoading: loading } = useThemeMusic(appId);
@@ -51,6 +51,20 @@ export default function GameSettings() {
     updateCache(appId, { volume: reset ? undefined : newVol }).catch(
       console.error
     );
+  }
+
+  function resetAutoPick() {
+    // An empty override means "No music", so the key is removed instead.
+    updateCache(appId, { videoId: undefined })
+      .then(() =>
+        toaster.toast({
+          title: t('resetAutoPick'),
+          body: t('resetAutoPickDone'),
+          icon: <FaRedo />,
+          duration: 2000
+        })
+      )
+      .catch(console.error);
   }
 
   return (
@@ -106,6 +120,15 @@ export default function GameSettings() {
         >
           {t('resetVolume')}
         </DialogButton>
+      </Focusable>
+      <Focusable style={{ marginTop: '16px' }}>
+        <DialogButton onClick={resetAutoPick} style={{ width: 'auto' }}>
+          <FaRedo style={{ marginRight: 8 }} />
+          {t('resetAutoPick')}
+        </DialogButton>
+        <div style={{ fontSize: '12px', opacity: 0.7, marginTop: '6px' }}>
+          {t('resetAutoPickDescription')}
+        </div>
       </Focusable>
     </div>
   );

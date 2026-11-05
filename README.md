@@ -65,6 +65,9 @@ Thanks again to the original author and contributors for making this plugin!
 - Supports both Steam and non-Steam games
 - Customizable music per game via context menu
 - Compatible with [AudioLoader](https://github.com/EMERALD0874/SDH-AudioLoader) (v1.5.0+)
+- Six sources, one tab each: YouTube, SoundCloud, Apple Music (30s previews), Deezer (30s previews), KHInsider (game soundtracks) and your own local files
+- Automatic pick tries YouTube first and falls back to the other sources when nothing is found (can be turned off)
+- Optional, experimental playback in the desktop Steam client (Settings > "Play in the desktop Steam client")
 
 ## Getting Started
 
@@ -104,7 +107,8 @@ pnpm run build:local
 
 - The plugin will automatically play a theme song when you view a game page.
 - To customize the song for a game select the context menu option under properties to be redirected to the song selection menu.
-- Choose from multiple providers including YouTube, iTunes, and local files.
+- Pick a source with the tabs on the song selection page: YouTube, SoundCloud, Apple Music, Deezer, KHInsider or Local. Only the open tab is searched.
+- Downloaded tracks are a cache (oldest are removed past 1 GB, "Restore missing downloads" brings overrides back). Imported local files live in their own folder and are never removed by "Delete downloads".
 
 ## Screenshots
 

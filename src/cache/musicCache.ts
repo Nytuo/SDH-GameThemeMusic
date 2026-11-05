@@ -45,9 +45,13 @@ export async function importCache(name: string) {
     'import_cache',
     name
   );
-  await localforage.clear();
+  // Write the backup first and only then drop what it doesn't contain, so a
+  // failure half way never leaves the user with an empty cache.
   for (const [key, value] of Object.entries(newCache)) {
     await localforage.setItem(key, value);
+  }
+  for (const key of await localforage.keys()) {
+    if (!(key in newCache)) await localforage.removeItem(key);
   }
 }
 
@@ -59,8 +63,8 @@ export async function clearCache(appId?: number) {
   if (appId?.toString().length) {
     await localforage.removeItem(appId.toString());
   } else {
+    // Backups are the user's safety net and are kept.
     await localforage.clear();
-    await call<[]>('clear_cache');
   }
 }
 
@@ -70,6 +74,7 @@ export async function getCache(
   return await localforage.getItem<GameThemeMusicCache>(appId.toString());
 }
 
-export async function clearDownloads() {
-  await call<[]>('clear_downloads');
+/** Delete downloaded audio. Returns how many files were removed. */
+export async function clearDownloads(): Promise<number> {
+  return (await call<[], number>('clear_downloads')) ?? 0;
 }

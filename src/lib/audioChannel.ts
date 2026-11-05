@@ -168,6 +168,12 @@ export class AudioChannel {
     }
   }
 
+  /** Silence without stopping, so unmuting resumes on the same spot. */
+  setMuted(muted: boolean) {
+    this.element.muted = muted;
+    this.emit();
+  }
+
   setVolume(volume: number) {
     if (!Number.isFinite(volume)) return;
     this.element.volume = Math.min(1, Math.max(0, volume));
@@ -197,12 +203,14 @@ export class AudioChannel {
 
 const channels = new Map<ChannelName, AudioChannel>();
 let allSuspended = false;
+let themeMuted = false;
 
 export function getAudioChannel(name: ChannelName): AudioChannel {
   let channel = channels.get(name);
   if (!channel) {
     channel = new AudioChannel(name);
     channel.setSuspended(allSuspended);
+    if (channel.name === 'theme') channel.setMuted(themeMuted);
     channels.set(name, channel);
   }
   return channel;
@@ -211,6 +219,16 @@ export function getAudioChannel(name: ChannelName): AudioChannel {
 export function setAllAudioSuspended(suspended: boolean) {
   allSuspended = suspended;
   channels.forEach((channel) => channel.setSuspended(suspended));
+}
+
+/** Mute or unmute the game theme music (previews stay audible). */
+export function setThemeMuted(muted: boolean) {
+  themeMuted = muted;
+  channels.get('theme')?.setMuted(muted);
+}
+
+export function isThemeMuted() {
+  return themeMuted;
 }
 
 export function pauseAllAudio() {
@@ -222,4 +240,5 @@ export function destroyAudioChannels() {
   channels.forEach((channel) => channel.halt());
   channels.clear();
   allSuspended = false;
+  themeMuted = false;
 }

@@ -38,12 +38,12 @@ class TestPathTraversal:
 
     async def test_import_local_music_rejects_bad_destination(self, plugin, tmp_path):
         src = write(tmp_path / "in.mp3")
-        assert await plugin.import_local_music(str(src), "../../evil") is False
+        assert await plugin.import_local_music(str(src), "../../evil") is None
         assert not (tmp_path / "evil.mp3").exists()
 
     async def test_import_local_music_rejects_non_audio(self, plugin, tmp_path):
         src = write(tmp_path / "script.sh")
-        assert await plugin.import_local_music(str(src), "x") is False
+        assert await plugin.import_local_music(str(src), "x") is None
 
     async def test_download_url_rejects_bad_id(self, plugin, fake_http):
         with pytest.raises(ValueError):
@@ -131,11 +131,13 @@ class TestYtDlpUpdateSafety:
         assert [p.name for p in target.parent.iterdir()] == [target.name]
 
     async def test_checksum_match_installs(self, plugin, fake_http):
-        target = write(Path(plugin._get_ytdlp_path()), b"old")
+        write(Path(plugin._get_bundled_ytdlp_path()), b"old")
         fake_http.routes["https://dl/"] = FakeResponse(b"new")
         digest = hashlib.sha256(b"new").hexdigest()
         assert await plugin.download_ytdlp_binary("https://dl/yt-dlp", digest)
-        assert target.read_bytes() == b"new"
+        # updates go to the runtime dir; the bundled binary is never touched
+        assert Path(plugin._get_ytdlp_path()).read_bytes() == b"new"
+        assert Path(plugin._get_bundled_ytdlp_path()).read_bytes() == b"old"
 
     async def test_expected_checksum_parsed_from_sums(self, plugin, fake_http):
         fake_http.routes["https://sums/"] = FakeResponse(
@@ -241,7 +243,7 @@ class TestDirectoryBrowsing:
 
 class TestLocalSearch:
     async def test_ignores_generic_words(self, plugin):
-        music = Path(plugin.music_path)
+        music = Path(plugin.local_path)
         write(music / "Zelda_Overworld.mp3")
         write(music / "Mario_Theme.ogg")
         write(music / "notes.txt")

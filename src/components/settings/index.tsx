@@ -18,6 +18,7 @@ import { useSettings } from '../../hooks/useSettings';
 import useTranslations from '../../hooks/useTranslations';
 import {
   FaDownload,
+  FaExclamationTriangle,
   FaUndo,
   FaSave,
   FaSync,
@@ -36,9 +37,23 @@ import { call, toaster } from '@decky/api';
 import { getResolverForVideoId } from '../../actions/audio';
 import PanelSocialButton from './socialButton';
 
+/** "backup-2026-11-05 10-12-03" -> "2026-11-05 10:12:03" */
+export function formatBackupName(name: string): string {
+  const match = name.match(
+    /^backup-(\d{4}-\d{2}-\d{2}) (\d{2})-(\d{2})-(\d{2})$/
+  );
+  return match ? `${match[1]} ${match[2]}:${match[3]}:${match[4]}` : name;
+}
+
 export default function Index() {
-  const { settings, setDefaultMuted, setVolume, setHomepageFocusMode } =
-    useSettings();
+  const {
+    settings,
+    setDefaultMuted,
+    setVolume,
+    setHomepageFocusMode,
+    setAutoFallback,
+    setPlayInDesktopMode
+  } = useSettings();
 
   const t = useTranslations();
   const [isUpdatingYtDlp, setIsUpdatingYtDlp] = useState(false);
@@ -83,7 +98,19 @@ export default function Index() {
     showModal(
       <ConfirmModal
         strTitle={t('deleteDownloadsConfirm')}
-        onOK={clearDownloads}
+        onOK={async () => {
+          try {
+            const count = await clearDownloads();
+            toaster.toast({
+              title: t('deleteDownloads'),
+              body: t('deleteDownloadsDone', { num: String(count) }),
+              icon: <FaDownload />,
+              duration: 1500
+            });
+          } catch (e) {
+            console.error('[GameThemeMusic] Could not delete downloads', e);
+          }
+        }}
       />
     );
   };
@@ -109,13 +136,23 @@ export default function Index() {
         strTitle={t('restoreOverridesConfirm')}
         strDescription={t('restoreOverridesConfirmDetails')}
         onOK={async () => {
-          await importCache(backup);
-          toaster.toast({
-            title: t('restoreSuccessful'),
-            body: t('restoreSuccessfulDetails'),
-            icon: <FaUndo />,
-            duration: 1500
-          });
+          try {
+            await importCache(backup);
+            toaster.toast({
+              title: t('restoreSuccessful'),
+              body: t('restoreSuccessfulDetails'),
+              icon: <FaUndo />,
+              duration: 1500
+            });
+          } catch (e) {
+            console.error('[GameThemeMusic] Restore failed', e);
+            toaster.toast({
+              title: t('restoreFailed'),
+              body: t('restoreFailedDetails'),
+              icon: <FaExclamationTriangle />,
+              duration: 3000
+            });
+          }
         }}
       />
     );
@@ -161,15 +198,23 @@ export default function Index() {
     );
     let failed = 0;
 
-    for (let index = 0; index < cached.length; index++) {
-      const videoId = cached[index].videoId as string;
-      const resolver = getResolverForVideoId(videoId);
-      modal.Update(getProgressModal(index, cached.length));
+    try {
+      for (let index = 0; index < cached.length; index++) {
+        const videoId = cached[index].videoId as string;
+        const resolver = getResolverForVideoId(videoId);
+        modal.Update(getProgressModal(index, cached.length));
 
-      if (await resolver.isDownloaded({ id: videoId })) continue;
-      if (!(await resolver.downloadAudio({ id: videoId }))) failed++;
+        try {
+          if (await resolver.isDownloaded({ id: videoId })) continue;
+          if (!(await resolver.downloadAudio({ id: videoId }))) failed++;
+        } catch (e) {
+          console.error('[GameThemeMusic] Restore download failed', e);
+          failed++;
+        }
+      }
+    } finally {
+      modal.Close();
     }
-    modal.Close();
     toaster.toast({
       title: failed ? t('downloadFailed') : t('downloadRestoreSuccessful'),
       body: failed
@@ -206,6 +251,26 @@ export default function Index() {
             description={t('defaultMutedDescription')}
             onChange={(newVal: boolean) => {
               setDefaultMuted(newVal);
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            checked={settings.autoFallback}
+            label={t('autoFallback')}
+            description={t('autoFallbackDescription')}
+            onChange={(newVal: boolean) => {
+              setAutoFallback(newVal);
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            checked={settings.playInDesktopMode}
+            label={t('playInDesktopMode')}
+            description={t('playInDesktopModeDescription')}
+            onChange={(newVal: boolean) => {
+              setPlayInDesktopMode(newVal);
             }}
           />
         </PanelSectionRow>
@@ -269,13 +334,23 @@ export default function Index() {
             bottomSeparator="none"
             layout="below"
             onClick={async () => {
-              await exportCache();
-              toaster.toast({
-                title: t('backupSuccessful'),
-                body: t('backupSuccessfulDetails'),
-                icon: <FaSave />,
-                duration: 1500
-              });
+              try {
+                await exportCache();
+                toaster.toast({
+                  title: t('backupSuccessful'),
+                  body: t('backupSuccessfulDetails'),
+                  icon: <FaSave />,
+                  duration: 1500
+                });
+              } catch (e) {
+                console.error('[GameThemeMusic] Backup failed', e);
+                toaster.toast({
+                  title: t('backupFailed'),
+                  body: t('backupFailedDetails'),
+                  icon: <FaExclamationTriangle />,
+                  duration: 3000
+                });
+              }
             }}
           >
             {t('backupOverrides')}
@@ -296,7 +371,7 @@ export default function Index() {
                       onClick={() => restoreCache(backup)}
                       key={backup}
                     >
-                      {backup}
+                      {formatBackupName(backup)}
                     </MenuItem>
                   ))}
                 </Menu>

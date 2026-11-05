@@ -15,6 +15,7 @@ vi.mock('localforage', () => ({
       store.delete(k);
     }),
     clear: vi.fn(async () => store.clear()),
+    keys: vi.fn(async () => Array.from(store.keys())),
     iterate: vi.fn(async (fn: (v: unknown, k: string) => void) => {
       store.forEach((v, k) => fn(v, k));
     })
@@ -68,11 +69,11 @@ describe('musicCache', () => {
     expect(mockCall).not.toHaveBeenCalled();
   });
 
-  it('clearCache() wipes everything including backend backups', async () => {
+  it('clearCache() wipes the overrides but keeps the backups', async () => {
     await updateCache(1, { videoId: 'a' });
     await clearCache();
     expect(await getFullCache()).toEqual({});
-    expect(mockCall).toHaveBeenCalledWith('clear_cache');
+    expect(mockCall).not.toHaveBeenCalled();
   });
 
   it('exportCache sends the full cache to the backend', async () => {
@@ -94,7 +95,8 @@ describe('musicCache', () => {
   it('listCacheBackups / clearDownloads proxy to the backend', async () => {
     mockCall.mockResolvedValue(['b1']);
     expect(await listCacheBackups()).toEqual(['b1']);
-    await clearDownloads();
+    mockCall.mockResolvedValue(3);
+    expect(await clearDownloads()).toBe(3);
     expect(mockCall).toHaveBeenCalledWith('clear_downloads');
   });
 });

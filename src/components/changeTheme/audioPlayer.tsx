@@ -2,46 +2,23 @@ import { DialogButton, Focusable } from '@decky/ui';
 import { toaster } from '@decky/api';
 import { useEffect, useRef, useState } from 'react';
 import useTranslations from '../../hooks/useTranslations';
-import {
-  AudioProvider,
-  getProviderFromId,
-  getResolverForVideoId
-} from '../../actions/audio';
+import { getProviderFromId, getResolverForVideoId } from '../../actions/audio';
 import { MediaContentPreview } from '../../../types/media';
 import {
   FaCheck,
-  FaCompactDisc,
   FaExclamationTriangle,
-  FaFolder,
-  FaMusic
+  FaMusic,
+  FaTrash
 } from 'react-icons/fa';
-import { SiYoutubemusic, SiItunes } from 'react-icons/si';
 import Spinner from '../spinner';
 import useAudioPlayer from '../../hooks/useAudioPlayer';
-
-const BADGES: Record<
-  AudioProvider,
-  { color: string; icon: JSX.Element; label: string }
-> = {
-  itunes: { color: '#d82d2d', icon: <SiItunes size={16} />, label: 'iTunes' },
-  khinsider: {
-    color: '#2d6fd8',
-    icon: <FaCompactDisc size={16} />,
-    label: 'KHInsider'
-  },
-  local: { color: '#3a8f3a', icon: <FaFolder size={16} />, label: 'Local' },
-  ytdlp: {
-    color: '#e62117',
-    icon: <SiYoutubemusic size={16} />,
-    label: 'YouTube'
-  }
-};
+import { PROVIDER_INFO } from '../../lib/providers';
 
 /** A URL that can be played as-is (no resolution needed). */
 function directUrl(video: MediaContentPreview): string | undefined {
   const url = video.url;
   if (!url) return undefined;
-  if (url.includes('youtube.com') || url.includes('youtu.be')) return undefined;
+  if (/youtube\.com|youtu\.be|soundcloud\.com/.test(url)) return undefined;
   return /^(https?:|data:)/.test(url) ? url : undefined;
 }
 
@@ -49,8 +26,11 @@ export default function AudioPlayer({
   selected,
   selectNewAudio,
   video,
-  volume
+  volume,
+  onDelete
 }: {
+  /** Only given for imported local files. */
+  onDelete?: () => void;
   video: MediaContentPreview;
   volume: number;
   selected: boolean;
@@ -147,8 +127,8 @@ export default function AudioPlayer({
     }
   }
 
-  const isItunes = provider === 'itunes';
-  const badgeInfo = BADGES[provider];
+  const badgeInfo = PROVIDER_INFO[provider];
+  const isSquare = provider === 'itunes' || provider === 'deezer';
   const busy = resolving || downloading;
 
   return (
@@ -168,7 +148,7 @@ export default function AudioPlayer({
           style={{
             position: 'relative',
             width: '100%',
-            aspectRatio: isItunes ? '1/1' : '16/9',
+            aspectRatio: isSquare ? '1/1' : '16/9',
             maxWidth: '230px',
             margin: '0 auto',
             overflow: 'hidden',
@@ -213,8 +193,9 @@ export default function AudioPlayer({
               zIndex: 2
             }}
           >
-            {badgeInfo.icon}
-            {badgeInfo.label}
+            {badgeInfo.icon()}
+            {provider === 'local' ? t('sourceLocal') : badgeInfo.label}
+            {badgeInfo.preview ? ` · ${t('previewOnly')}` : ''}
           </div>
         </div>
         <p
@@ -251,37 +232,66 @@ export default function AudioPlayer({
               disabled={selected || busy}
               focusable={!selected && !busy}
               onClick={selectAudio}
+              style={
+                selected
+                  ? {
+                      background: '#3d8f2f',
+                      color: '#fff',
+                      opacity: 1,
+                      fontWeight: 700
+                    }
+                  : undefined
+              }
             >
-              {selected
-                ? t('selected')
-                : downloading
-                  ? t('downloading')
-                  : downloaded
-                    ? t('select')
-                    : t('download')}
+              {selected ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <FaCheck />
+                  {t('selected')}
+                </span>
+              ) : downloading ? (
+                t('downloading')
+              ) : downloaded ? (
+                t('select')
+              ) : (
+                t('download')
+              )}
             </DialogButton>
-            {selected || downloaded ? (
+            {downloaded && !selected ? (
               <div
+                title={t('downloaded')}
                 style={{
-                  height: '20px',
-                  width: '20px',
                   position: 'absolute',
-                  bottom: '-6px',
-                  right: '-6px',
-                  background: selected ? '#59bf40' : '#4a6b8a',
+                  top: '50%',
+                  right: '8px',
+                  transform: 'translateY(-50%)',
+                  height: '18px',
+                  width: '18px',
+                  background: '#4a6b8a',
                   borderRadius: '50%',
                   color: 'white',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  fontSize: '10px',
+                  pointerEvents: 'none'
                 }}
               >
                 <FaCheck />
               </div>
-            ) : (
-              ''
-            )}
+            ) : null}
           </div>
+          {onDelete && (
+            <DialogButton onClick={onDelete} disabled={busy} focusable={!busy}>
+              <FaTrash style={{ marginRight: 6 }} />
+              {t('delete')}
+            </DialogButton>
+          )}
         </div>
       </Focusable>
     </div>

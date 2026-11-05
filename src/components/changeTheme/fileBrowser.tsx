@@ -6,6 +6,7 @@ import {
   PanelSectionRow
 } from '@decky/ui';
 import { useState, useEffect } from 'react';
+import useTranslations from '../../hooks/useTranslations';
 import { FaFolder, FaMusic, FaLevelUpAlt, FaHome } from 'react-icons/fa';
 
 interface FileEntry {
@@ -20,6 +21,7 @@ export default function FileBrowser({
 }: {
   onFileSelected?: (filePath: string, fileName: string) => void;
 }) {
+  const t = useTranslations();
   const isWindows = navigator.platform.startsWith('Win');
   const defaultPath = isWindows ? 'C:\\' : '/home/deck';
   const [currentPath, setCurrentPath] = useState(defaultPath);
@@ -39,18 +41,25 @@ export default function FileBrowser({
   ];
 
   useEffect(() => {
-    loadDirectory(currentPath).then(() => {
-      return;
-    });
+    // A slow listing must not overwrite a newer one.
+    let ignore = false;
+    loadDirectory(currentPath, () => ignore).catch(console.error);
+    return () => {
+      ignore = true;
+    };
   }, [currentPath]);
 
-  async function loadDirectory(path: string) {
+  async function loadDirectory(path: string, isStale: () => boolean) {
     setLoading(true);
     setError('');
     try {
       const result = await call<[string], any>('list_directory', path);
+      if (isStale()) return;
 
-      if (result && result.entries) {
+      if (result?.error) {
+        setEntries([]);
+        setError(`${t('loadDirectoryFailed')}: ${result.error}`);
+      } else if (result && result.entries) {
         const fileEntries: FileEntry[] = result.entries.map((entry: any) => ({
           name: entry.name,
           path: entry.path,
@@ -71,10 +80,12 @@ export default function FileBrowser({
         setEntries(fileEntries);
       }
     } catch (e) {
+      if (isStale()) return;
       console.error('Failed to load directory:', e);
-      setError(`Failed to load directory: ${String(e)}`);
+      setEntries([]);
+      setError(`${t('loadDirectoryFailed')}: ${String(e)}`);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }
 
@@ -106,7 +117,7 @@ export default function FileBrowser({
   }
 
   return (
-    <PanelSection title="Browse Music Files">
+    <PanelSection title={t('browseFiles')}>
       <PanelSectionRow>
         <Focusable
           style={{
@@ -171,11 +182,11 @@ export default function FileBrowser({
         >
           {loading ? (
             <div style={{ padding: '20px', textAlign: 'center', opacity: 0.7 }}>
-              Loading...
+              {t('loading')}
             </div>
           ) : entries.length === 0 ? (
             <div style={{ padding: '20px', textAlign: 'center', opacity: 0.7 }}>
-              Empty directory
+              {t('emptyDirectory')}
             </div>
           ) : (
             entries.map((entry) => (
@@ -236,7 +247,7 @@ export default function FileBrowser({
 
       <PanelSectionRow>
         <div style={{ fontSize: '11px', opacity: 0.6, marginTop: '8px' }}>
-          Supported: MP3, M4A, WebM, OGG, WAV, FLAC, AAC, OPUS
+          {t('supportedFormats')}: MP3, M4A, WebM, OGG, WAV, FLAC, AAC, OPUS
         </div>
       </PanelSectionRow>
     </PanelSection>

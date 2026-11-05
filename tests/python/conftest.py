@@ -56,11 +56,13 @@ def plugin(tmp_path, monkeypatch):
 
     p = main.Plugin()
     p.music_path = str(tmp_path / "music")
+    p.local_path = str(tmp_path / "local")
     p.cache_path = str(tmp_path / "cache")
+    p.runtime_bin_path = str(tmp_path / "runtime_bin")
     Path(p.music_path).mkdir()
+    Path(p.local_path).mkdir()
     Path(p.cache_path).mkdir()
     p.settings = FakeSettingsManager("config")
-    p.yt_process = None
     # Deterministic, host independent behaviour; Windows paths are tested
     # explicitly.
     p.is_windows = False

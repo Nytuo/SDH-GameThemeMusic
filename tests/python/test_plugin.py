@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -43,9 +44,13 @@ class TestLifecycle:
 
     async def test_unload_terminates_running_process(self, plugin):
         proc = FakeProcess()
-        plugin.yt_process = proc
+        plugin.searches["s1"] = proc
+        running = FakeProcess()
+        plugin.running_processes.add(running)
         await plugin._unload()
         assert proc.terminated
+        assert running.terminated
+        assert plugin.searches == {}
 
     async def test_windows_kills_whole_process_tree(self, plugin, fake_exec):
         plugin.is_windows = True
@@ -129,11 +134,11 @@ class TestYtDlpBinary:
         assert await plugin.get_latest_ytdlp_release() is None
 
     async def test_download_binary_replaces_existing(self, plugin, fake_http):
-        target = write(Path(plugin._get_ytdlp_path()), b"old")
+        write(Path(plugin._get_bundled_ytdlp_path()), b"old")
         fake_http.routes["https://dl/"] = FakeResponse(b"new-binary")
         assert await plugin.download_ytdlp_binary("https://dl/yt-dlp") is True
-        assert target.read_bytes() == b"new-binary"
-        assert not target.with_suffix(".tmp").exists()
+        assert Path(plugin._get_ytdlp_path()).read_bytes() == b"new-binary"
+        assert Path(plugin._get_bundled_ytdlp_path()).read_bytes() == b"old"
 
     async def test_download_binary_failure_keeps_existing(self, plugin, fake_http):
         target = write(Path(plugin._get_ytdlp_path()), b"old")
@@ -254,14 +259,50 @@ class TestYouTube:
         assert [r["id"] for r in results] == [yt_id(0), yt_id(1), yt_id(2)]
         assert "--flat-playlist" in args
 
-    async def test_new_search_terminates_previous(self, plugin, fake_exec):
+    async def test_searches_are_independent(self, plugin, fake_exec):
         write(Path(plugin._get_ytdlp_path()))
-        first = FakeProcess(stdout=b"")
+        first = FakeProcess(stdout=json.dumps(yt_entry(1)).encode() + b"\n")
         fake_exec.next = first
-        await plugin.search_yt("a")
-        fake_exec.next = FakeProcess(stdout=b"")
-        await plugin.search_yt("b")
-        assert first.terminated
+        a = await plugin.search_yt("a")
+        second = FakeProcess(stdout=json.dumps(yt_entry(2)).encode() + b"\n")
+        fake_exec.next = second
+        b = await plugin.search_yt("b")
+        assert a and b and a != b
+        assert not first.terminated
+        assert (await plugin.next_yt_result(a))["id"] == yt_id(1)
+        assert (await plugin.next_yt_result(b))["id"] == yt_id(2)
+
+    async def test_oldest_search_is_dropped_over_the_limit(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        procs = []
+        for i in range(main.MAX_ACTIVE_SEARCHES + 1):
+            procs.append(FakeProcess(stdout=b""))
+            fake_exec.next = procs[-1]
+            await plugin.search_yt(f"t{i}")
+        assert procs[0].terminated
+        assert len(plugin.searches) == main.MAX_ACTIVE_SEARCHES
+
+    async def test_close_search_stops_process(self, plugin, fake_exec):
+        write(Path(plugin._get_ytdlp_path()))
+        proc = FakeProcess(stdout=b"")
+        fake_exec.next = proc
+        sid = await plugin.search_yt("a")
+        await plugin.close_search(sid)
+        assert proc.terminated and plugin.searches == {}
+
+    async def test_soundcloud_search_uses_scsearch_and_track_url(
+        self, plugin, fake_exec
+    ):
+        write(Path(plugin._get_ytdlp_path()))
+        entry = {"id": "123", "title": "T", "url": "https://soundcloud.com/a/b"}
+        fake_exec.next = FakeProcess(stdout=json.dumps(entry).encode() + b"\n")
+        sid = await plugin.search_yt("zelda", "soundcloud")
+        assert any(str(a).startswith("scsearch") for a in fake_exec.calls[0]["args"])
+        assert (await plugin.next_yt_result(sid))["id"] == "https://soundcloud.com/a/b"
+
+    async def test_unknown_search_provider_rejected(self, plugin):
+        with pytest.raises(ValueError):
+            await plugin.search_yt("x", "nope")
 
     async def test_next_result_skips_bad_json(self, plugin, fake_exec):
         write(Path(plugin._get_ytdlp_path()))
@@ -493,7 +534,7 @@ class TestLocalLibrary:
         assert plugin.local_match("song") is None
 
     async def test_search_local_music_filters_and_limits(self, plugin):
-        music = Path(plugin.music_path)
+        music = Path(plugin.local_path)
         for name in ["Zelda_Theme.mp3", "mario-song.ogg", "notes.txt", "zelda2.flac"]:
             write(music / name)
 
@@ -508,7 +549,7 @@ class TestLocalLibrary:
         assert len(await plugin.search_local_music("", limit=1)) == 1
 
     async def test_search_local_music_missing_dir(self, plugin, tmp_path):
-        plugin.music_path = str(tmp_path / "nope")
+        plugin.local_path = str(tmp_path / "nope")
         assert await plugin.search_local_music("") == []
 
     @pytest.mark.parametrize(
@@ -517,7 +558,7 @@ class TestLocalLibrary:
          ("flac", "audio/flac")],
     )
     async def test_get_local_music_url_mime(self, plugin, ext, mime):
-        write(Path(plugin.music_path) / f"track.{ext}", b"data")
+        write(Path(plugin.local_path) / f"track.{ext}", b"data")
         url = await plugin.get_local_music_url("local_track")
         assert url.startswith(f"data:{mime};base64,")
         assert base64.b64decode(url.split(",", 1)[1]) == b"data"
@@ -525,32 +566,8 @@ class TestLocalLibrary:
     async def test_get_local_music_url_missing(self, plugin):
         assert await plugin.get_local_music_url("local_nothing") is None
 
-    async def test_save_local_music_copies(self, plugin, tmp_path):
-        src = write(tmp_path / "My Song.mp3", b"abc")
-        new_id = await plugin.save_local_music(str(src))
-        assert new_id == "local_My Song"
-        assert (Path(plugin.music_path) / "My Song.mp3").read_bytes() == b"abc"
-
-    async def test_save_local_music_sanitizes_custom_name(self, plugin, tmp_path):
-        src = write(tmp_path / "a.ogg")
-        new_id = await plugin.save_local_music(str(src), "../../evil name!")
-        assert new_id == "local_evil_name"
-        assert (Path(plugin.music_path) / "evil_name.ogg").exists()
-
-    async def test_save_local_music_rejects_bad_input(self, plugin, tmp_path):
-        assert await plugin.save_local_music(str(tmp_path / "missing.mp3")) is None
-        assert await plugin.save_local_music(str(tmp_path)) is None
-        exe = write(tmp_path / "virus.exe")
-        assert await plugin.save_local_music(str(exe)) is None
-
-    async def test_save_local_music_existing_returns_id(self, plugin, tmp_path):
-        write(Path(plugin.music_path) / "dup.mp3", b"old")
-        src = write(tmp_path / "dup.mp3", b"new")
-        assert await plugin.save_local_music(str(src)) == "local_dup"
-        assert (Path(plugin.music_path) / "dup.mp3").read_bytes() == b"old"
-
     async def test_delete_local_music(self, plugin):
-        f = write(Path(plugin.music_path) / "bye.mp3")
+        f = write(Path(plugin.local_path) / "bye.mp3")
         assert await plugin.delete_local_music("local_bye") is True
         assert not f.exists()
         assert await plugin.delete_local_music("local_bye") is False
@@ -564,9 +581,46 @@ class TestLocalLibrary:
 
     async def test_import_local_music(self, plugin, tmp_path):
         src = write(tmp_path / "in.flac", b"flac")
-        assert await plugin.import_local_music(str(src), "imported") is True
-        assert (Path(plugin.music_path) / "imported.flac").read_bytes() == b"flac"
-        assert await plugin.import_local_music(str(tmp_path / "x.mp3"), "y") is False
+        assert await plugin.import_local_music(str(src), "imported") == "local_imported"
+        assert (Path(plugin.local_path) / "imported.flac").read_bytes() == b"flac"
+        assert await plugin.import_local_music(str(tmp_path / "x.mp3"), "y") is None
+
+    async def test_import_uses_source_name_when_unnamed(self, plugin, tmp_path):
+        src = write(tmp_path / "My Song.mp3", b"abc")
+        assert await plugin.import_local_music(str(src)) == "local_My Song"
+
+    async def test_import_never_overwrites(self, plugin, tmp_path):
+        write(Path(plugin.local_path) / "dup.mp3", b"old")
+        src = write(tmp_path / "dup.mp3", b"new")
+        assert await plugin.import_local_music(str(src), "dup") == "local_dup_2"
+        assert (Path(plugin.local_path) / "dup.mp3").read_bytes() == b"old"
+        assert (Path(plugin.local_path) / "dup_2.mp3").read_bytes() == b"new"
+
+    async def test_clear_downloads_keeps_local_library(self, plugin):
+        write(Path(plugin.local_path) / "mine.mp3")
+        write(Path(plugin.music_path) / "abc.mp3")
+        await plugin.clear_downloads()
+        assert (Path(plugin.local_path) / "mine.mp3").exists()
+        assert list(Path(plugin.music_path).iterdir()) == []
+
+    def test_legacy_imports_move_to_local_library(self, plugin):
+        music = Path(plugin.music_path)
+        write(music / "My_Own_Song_Remix.mp3")
+        write(music / f"{yt_id(1)}.webm")
+        write(music / "itunes_42.m4a")
+        plugin._migrate_legacy_local_files()
+        assert (Path(plugin.local_path) / "My_Own_Song_Remix.mp3").exists()
+        assert (music / f"{yt_id(1)}.webm").exists()
+        assert (music / "itunes_42.m4a").exists()
+
+    async def test_download_cap_evicts_oldest(self, plugin, monkeypatch):
+        monkeypatch.setattr(main, "MAX_DOWNLOADS_TOTAL_BYTES", 10)
+        music = Path(plugin.music_path)
+        old = write(music / "old.mp3", b"123456")
+        new = write(music / "new.mp3", b"123456")
+        os.utime(old, (1, 1))
+        await plugin._enforce_download_cap(keep=str(new))
+        assert not old.exists() and new.exists()
 
 
 # --------------------------------------------------------------------------- #

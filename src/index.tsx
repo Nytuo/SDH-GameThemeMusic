@@ -14,6 +14,11 @@ import {
 } from './state/AudioLoaderCompatState';
 import { destroyAudioChannels } from './lib/audioChannel';
 import { startPlaybackGuard } from './lib/playbackGuard';
+import { startDesktopPlayer } from './lib/desktopPlayer';
+import { startDesktopLauncher } from './lib/desktopLauncher';
+import { setDesktopThemeState } from './lib/desktopWindows';
+import { translate } from './hooks/useTranslations';
+import { ensureSettingsLoaded, getSettingsSnapshot } from './hooks/useSettings';
 
 import { name } from '@decky/manifest';
 
@@ -30,9 +35,21 @@ export default definePlugin(() => {
     /* Router not ready */
   }
 
-  const stopPlaybackGuard = startPlaybackGuard((suspended) =>
-    state.setSuspended(suspended)
+  // The playback guard and desktop player read settings outside React.
+  ensureSettingsLoaded().catch(() => {});
+
+  const stopPlaybackGuard = startPlaybackGuard(
+    (suspended) => state.setSuspended(suspended),
+    { allowDesktop: () => getSettingsSnapshot().playInDesktopMode }
   );
+  const stopDesktopPlayer = startDesktopPlayer(state);
+  setDesktopThemeState(state);
+  const stopDesktopLauncher = startDesktopLauncher(() => ({
+    changeMusic: translate('changeThemeMusic'),
+    settings: translate('settings'),
+    mute: translate('muteMusic'),
+    unmute: translate('unmuteMusic')
+  }));
   const libraryPatch = patchLibraryApp(state);
 
   const GlobalPlayer = () => (
@@ -65,22 +82,27 @@ export default definePlugin(() => {
     console.warn('[GameThemeMusic] Failed to patch context menu:', e);
   }
 
-  const AppStateRegistrar =
-    SteamClient.GameSessions.RegisterForAppLifetimeNotifications(
-      (update: AppState) => {
-        const { gamesRunning } = state.getPublicState();
-        const setGamesRunning = state.setGamesRunning.bind(state);
+  let AppStateRegistrar: { unregister: () => void } | null = null;
+  try {
+    AppStateRegistrar =
+      SteamClient.GameSessions.RegisterForAppLifetimeNotifications(
+        (update: AppState) => {
+          const { gamesRunning } = state.getPublicState();
+          const setGamesRunning = state.setGamesRunning.bind(state);
 
-        if (update.bRunning) {
-          setGamesRunning([...gamesRunning, update.unAppID]);
-        } else {
-          const filteredGames = gamesRunning.filter(
-            (e: number) => e !== update.unAppID
-          );
-          setGamesRunning(filteredGames);
+          if (update.bRunning) {
+            setGamesRunning([...gamesRunning, update.unAppID]);
+          } else {
+            const filteredGames = gamesRunning.filter(
+              (e: number) => e !== update.unAppID
+            );
+            setGamesRunning(filteredGames);
+          }
         }
-      }
-    );
+      );
+  } catch (e) {
+    console.warn('[GameThemeMusic] Could not watch running games:', e);
+  }
 
   return {
     name,
@@ -88,8 +110,11 @@ export default definePlugin(() => {
     icon: <GiMusicalNotes />,
     content: <Settings />,
     onDismount() {
+      stopDesktopLauncher();
+      setDesktopThemeState(null);
+      stopDesktopPlayer();
       stopPlaybackGuard();
-      AppStateRegistrar.unregister();
+      AppStateRegistrar?.unregister();
       routerHook.removePatch('/library/app/:appid', libraryPatch);
       routerHook.removeRoute('/gamethememusic/:appid');
       routerHook.removeGlobalComponent('GTMFocusedPlayer');

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { call } from '@decky/api';
 import {
+  AUTO_PROVIDERS,
+  DeezerAudioResolver,
+  findAutoAudio,
   getProviderFromId,
   getResolver,
   getResolverForVideoId,
@@ -26,6 +29,9 @@ beforeEach(() => {
 describe('getProviderFromId', () => {
   it.each([
     ['itunes_123', 'itunes'],
+    ['deezer_9', 'deezer'],
+    ['https://soundcloud.com/artist/track', 'soundcloud'],
+    ['https://api.soundcloud.com/tracks/1', 'soundcloud'],
     ['local_my_song', 'local'],
     ['dQw4w9WgXcQ', 'ytdlp'],
     ['', 'ytdlp'],
@@ -60,13 +66,59 @@ describe('YtDlp resolver', () => {
       { id: 'b', title: 'B', thumbnail: '', url: 'u2' }
     ];
     mockCall.mockImplementation(async (method: string) => {
-      if (method === 'search_yt') return undefined;
+      if (method === 'search_yt') return 'search-1';
       if (method === 'next_yt_result') return results.shift() ?? null;
+      if (method === 'close_search') return undefined;
       throw new Error(method);
     });
     const out = await collect(getResolver('ytdlp').getSearchResults('zelda'));
     expect(out.map((v) => v.id)).toEqual(['a', 'b']);
-    expect(mockCall).toHaveBeenCalledWith('search_yt', 'zelda');
+    expect(mockCall).toHaveBeenCalledWith('search_yt', 'zelda', 'youtube');
+    expect(mockCall).toHaveBeenCalledWith('next_yt_result', 'search-1');
+    expect(mockCall).toHaveBeenCalledWith('close_search', 'search-1');
+  });
+
+  it('searches SoundCloud through the same backend call', async () => {
+    mockCall.mockImplementation(async (method: string) =>
+      method === 'search_yt' ? 'sc-1' : null
+    );
+    await collect(getResolver('soundcloud').getSearchResults('zelda'));
+    expect(mockCall).toHaveBeenCalledWith('search_yt', 'zelda', 'soundcloud');
+  });
+
+  it('releases the search when the consumer stops early', async () => {
+    mockCall.mockImplementation(async (method: string) => {
+      if (method === 'search_yt') return 'search-2';
+      if (method === 'next_yt_result')
+        return { id: 'a', title: 'A', thumbnail: '' };
+      return undefined;
+    });
+    for await (const _ of getResolver('ytdlp').getSearchResults('x')) {
+      void _;
+      break;
+    }
+    expect(mockCall).toHaveBeenCalledWith('close_search', 'search-2');
+  });
+
+  it('does nothing when the backend cannot start a search', async () => {
+    mockCall.mockResolvedValue(null);
+    expect(await collect(getResolver('ytdlp').getSearchResults('x'))).toEqual(
+      []
+    );
+    expect(mockCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves SoundCloud pages through the backend', async () => {
+    mockCall.mockResolvedValue('https://stream');
+    const url = await getResolver('soundcloud').getAudioUrlFromVideo({
+      id: 'https://soundcloud.com/a/b',
+      url: 'https://soundcloud.com/a/b'
+    });
+    expect(url).toBe('https://stream');
+    expect(mockCall).toHaveBeenCalledWith(
+      'single_yt_url',
+      'https://soundcloud.com/a/b'
+    );
   });
 
   it('swallows backend errors during search', async () => {
@@ -164,12 +216,13 @@ describe('AudioResolver.getAudio', () => {
     mockCall.mockImplementation(async (method: string, arg: string) => {
       switch (method) {
         case 'search_yt':
-          return undefined;
+          return 'search-1';
         case 'next_yt_result':
           return results.shift() ?? null;
         case 'single_yt_url':
           return arg === 'good' ? 'https://good' : null;
         case 'download_yt_audio':
+        case 'close_search':
           return undefined;
       }
       throw new Error(method);
@@ -182,11 +235,13 @@ describe('AudioResolver.getAudio', () => {
 
   it('stops when cancelled', async () => {
     mockCall.mockImplementation(async (method: string) =>
-      method === 'next_yt_result'
-        ? { id: 'a', title: 'a', thumbnail: '' }
-        : method === 'single_yt_url'
-          ? 'https://a'
-          : undefined
+      method === 'search_yt'
+        ? 'search-1'
+        : method === 'next_yt_result'
+          ? { id: 'a', title: 'a', thumbnail: '' }
+          : method === 'single_yt_url'
+            ? 'https://a'
+            : undefined
     );
     expect(
       await getResolver('ytdlp').getAudio('Zelda', () => true)
@@ -196,9 +251,11 @@ describe('AudioResolver.getAudio', () => {
 
   it('gives up after a few unplayable results', async () => {
     mockCall.mockImplementation(async (method: string) =>
-      method === 'next_yt_result'
-        ? { id: 'x', title: 'x', thumbnail: '' }
-        : null
+      method === 'search_yt'
+        ? 'search-1'
+        : method === 'next_yt_result'
+          ? { id: 'x', title: 'x', thumbnail: '' }
+          : null
     );
     expect(await getResolver('ytdlp').getAudio('Zelda')).toBeUndefined();
     expect(
@@ -208,7 +265,7 @@ describe('AudioResolver.getAudio', () => {
 
   it('returns undefined when nothing is playable', async () => {
     mockCall.mockImplementation(async (method: string) =>
-      method === 'next_yt_result' ? null : undefined
+      method === 'search_yt' ? 'search-1' : null
     );
     expect(await getResolver('ytdlp').getAudio('Nothing')).toBeUndefined();
   });
@@ -301,5 +358,136 @@ describe('resolveDownloadHref', () => {
     expect(resolveDownloadHref('/download/track.zip')).toBeUndefined();
     expect(resolveDownloadHref(null)).toBeUndefined();
     expect(resolveDownloadHref('')).toBeUndefined();
+  });
+});
+
+describe('Deezer resolver', () => {
+  it('maps backend results and picks the Deezer resolver', async () => {
+    expect(getResolverForVideoId('deezer_1')).toBeInstanceOf(
+      DeezerAudioResolver
+    );
+    mockCall.mockResolvedValue([
+      {
+        id: 'deezer_1',
+        title: 'T',
+        url: 'https://p.mp3',
+        thumbnail: 'th',
+        artist: 'a',
+        album: 'b',
+        duration: 30
+      }
+    ]);
+    const out = await collect(getResolver('deezer').getSearchResults('x'));
+    expect(out).toEqual([
+      { id: 'deezer_1', title: 'T', url: 'https://p.mp3', thumbnail: 'th' }
+    ]);
+    expect(mockCall).toHaveBeenCalledWith('search_deezer', 'x', 10);
+  });
+
+  it('downloads through the shared download_url call', async () => {
+    mockCall.mockResolvedValue(undefined);
+    expect(
+      await getResolver('deezer').downloadAudio({
+        id: 'deezer_1',
+        url: 'https://p.mp3'
+      })
+    ).toBe(true);
+    expect(mockCall).toHaveBeenCalledWith(
+      'download_url',
+      'https://p.mp3',
+      'deezer_1'
+    );
+  });
+});
+
+describe('findAutoAudio', () => {
+  /** Backend where only the listed providers have anything playable. */
+  function backendWith(playable: Partial<Record<string, string>>) {
+    mockCall.mockImplementation(async (method: string, ...args: unknown[]) => {
+      switch (method) {
+        case 'search_yt':
+          return `s-${args[1]}`;
+        case 'next_yt_result': {
+          const source = String(args[0]).replace('s-', '');
+          const key = source === 'youtube' ? 'ytdlp' : source;
+          return playable[key]
+            ? { id: `${key}-id`, title: key, thumbnail: '' }
+            : null;
+        }
+        case 'single_yt_url':
+          return `https://stream/${args[0]}`;
+        case 'search_itunes':
+          return playable.itunes
+            ? [
+                {
+                  id: 'itunes_1',
+                  title: 't',
+                  url: 'https://i.m4a',
+                  thumbnail: ''
+                }
+              ]
+            : [];
+        case 'search_deezer':
+          return playable.deezer
+            ? [
+                {
+                  id: 'deezer_1',
+                  title: 't',
+                  url: 'https://d.mp3',
+                  thumbnail: ''
+                }
+              ]
+            : [];
+        case 'fetch_url':
+          return '';
+        default:
+          return undefined;
+      }
+    });
+  }
+
+  it('tries YouTube first', () => {
+    expect(AUTO_PROVIDERS[0]).toBe('ytdlp');
+  });
+
+  it('uses YouTube when it has a result', async () => {
+    backendWith({ ytdlp: 'x', deezer: 'x' });
+    const found = await findAutoAudio('Zelda');
+    expect(found?.provider).toBe('ytdlp');
+    expect(found?.videoId).toBe('ytdlp-id');
+  });
+
+  it('falls back to the next source when YouTube finds nothing', async () => {
+    backendWith({ deezer: 'x' });
+    const found = await findAutoAudio('Zelda');
+    expect(found).toMatchObject({
+      provider: 'deezer',
+      videoId: 'deezer_1',
+      audioUrl: 'https://d.mp3'
+    });
+  });
+
+  it('stays on YouTube when fallback is off', async () => {
+    backendWith({ deezer: 'x' });
+    expect(await findAutoAudio('Zelda', { fallback: false })).toBeUndefined();
+    expect(mockCall).not.toHaveBeenCalledWith('search_deezer', 'Zelda', 10);
+  });
+
+  it('gives up when nothing anywhere is playable', async () => {
+    backendWith({});
+    expect(await findAutoAudio('Zelda')).toBeUndefined();
+  });
+
+  it('stops trying sources once cancelled', async () => {
+    backendWith({});
+    let cancelled = false;
+    mockCall.mockImplementationOnce(async () => {
+      cancelled = true;
+      return null;
+    });
+    expect(
+      await findAutoAudio('Zelda', { isCancelled: () => cancelled })
+    ).toBeUndefined();
+    expect(mockCall).not.toHaveBeenCalledWith('search_deezer', 'Zelda', 10);
   });
 });
